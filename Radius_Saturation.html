@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSV Saturation Visualizer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f4f5f7; /* Confluence background match */
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        canvas {
+            border-radius: 50%;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            width: 100%;
+        }
+        .slider-group {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            justify-content: space-between;
+        }
+        .slider-label {
+            font-weight: bold;
+            width: 80px;
+            text-align: left;
+        }
+        input[type=range] {
+            flex-grow: 1;
+            cursor: pointer;
+        }
+        .swatch-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-top: 10px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            width: 100%;
+        }
+        .swatch {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 2px solid #dfe1e6;
+            box-shadow: inset 0 0 4px rgba(0,0,0,0.1);
+        }
+        .explanation {
+            font-size: 0.9em;
+            color: #5e6c84;
+            margin-top: 15px;
+            line-height: 1.4;
+            text-align: left;
+            background: #e9ecef;
+            padding: 12px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>HSV Cylindrical Model: Radius (Saturation)</h2>
+    
+    <!-- The Color Wheel Canvas -->
+    <canvas id="colorWheel" width="300" height="300"></canvas>
+    
+    <div class="controls">
+        <!-- Hue Slider (Angle) -->
+        <div class="slider-group">
+            <span class="slider-label">Hue (Angle)</span>
+            <input type="range" id="hueSlider" min="0" max="360" value="200">
+            <span id="hueVal" style="width: 40px; text-align: right;">200°</span>
+        </div>
+
+        <!-- Saturation Slider (Radius) -->
+        <div class="slider-group">
+            <span class="slider-label">Saturation (Radius)</span>
+            <input type="range" id="satSlider" min="0" max="100" value="100">
+            <span id="satVal" style="width: 40px; text-align: right;">100%</span>
+        </div>
+        
+        <div class="swatch-container">
+            <span>Resulting Color:</span>
+            <div id="colorSwatch" class="swatch"></div>
+        </div>
+    </div>
+    
+    <div class="explanation">
+        <strong>How it works:</strong> The distance from the center represents Saturation. At <strong>100%</strong>, the dot is at the outer edge (pure color). As you drag it to <strong>0%</strong>, it moves to the center axis, becoming completely colorless (white, assuming max brightness).
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('colorWheel');
+    const ctx = canvas.getContext('2d');
+    
+    const hueSlider = document.getElementById('hueSlider');
+    const satSlider = document.getElementById('satSlider');
+    const hueVal = document.getElementById('hueVal');
+    const satVal = document.getElementById('satVal');
+    const swatch = document.getElementById('colorSwatch');
+    
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const maxRadius = canvas.width / 2;
+
+    // Helper: Convert HSV (V=100) to CSS HSL string for accurate rendering
+    function hsvToCssHsl(h, s) {
+        // In the top slice of the cylinder (Value = 100%):
+        // As Saturation drops, Lightness in HSL goes from 50% (pure color) to 100% (white).
+        const l = 100 - (s / 2);
+        return `hsl(${h}, 100%, ${l}%)`;
+    }
+
+    function drawBaseWheel() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 1. Draw the Hue circle
+        for (let angle = 0; angle < 360; angle++) {
+            const startAngle = (angle - 1) * Math.PI / 180;
+            const endAngle = (angle + 1) * Math.PI / 180;
+            
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.arc(centerX, centerY, maxRadius, startAngle, endAngle);
+            ctx.closePath();
+            ctx.fillStyle = `hsl(${angle}, 100%, 50%)`;
+            ctx.fill();
+        }
+
+        // 2. Overlay a radial gradient from White (center) to Transparent (edge)
+        // This creates the Saturation effect where the center is S=0 (White)
+        const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, maxRadius);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)'); // Center is pure white
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)'); // Edge is the pure hue
+        
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+    }
+
+    function drawIndicator(hue, sat) {
+        drawBaseWheel(); // Clear and redraw the gradient wheel
+        
+        const angleRad = hue * Math.PI / 180;
+        // Calculate distance from center based on saturation (0 to 100)
+        const currentRadius = maxRadius * (sat / 100); 
+        
+        const pointerX = centerX + Math.cos(angleRad) * currentRadius;
+        const pointerY = centerY + Math.sin(angleRad) * currentRadius;
+        
+        // Draw a faint guide line from center to edge
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(centerX + Math.cos(angleRad) * maxRadius, centerY + Math.sin(angleRad) * maxRadius);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.setLineDash([4, 4]); // Dashed line
+        ctx.stroke();
+        ctx.setLineDash([]); // Reset dashes
+        
+        // Draw the indicator dot at the current radius
+        ctx.beginPath();
+        ctx.arc(pointerX, pointerY, 8, 0, Math.PI * 2);
+        ctx.fillStyle = hsvToCssHsl(hue, sat);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#000000'; // Black border to make it pop against light backgrounds
+        ctx.stroke();
+    }
+
+    function updateVisuals() {
+        const h = parseInt(hueSlider.value);
+        const s = parseInt(satSlider.value);
+        
+        // Update text labels
+        hueVal.innerText = `${h}°`;
+        satVal.innerText = `${s}%`;
+        
+        // Update swatch color
+        swatch.style.backgroundColor = hsvToCssHsl(h, s);
+        
+        // Redraw canvas
+        drawIndicator(h, s);
+    }
+
+    // Event listeners
+    hueSlider.addEventListener('input', updateVisuals);
+    satSlider.addEventListener('input', updateVisuals);
+
+    // Initial render
+    updateVisuals();
+</script>
+
+</body>
+</html>
