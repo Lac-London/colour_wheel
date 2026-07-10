@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSV Brightness Visualizer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f4f5f7;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            background: white;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            max-width: 550px;
+            width: 100%;
+        }
+        h2 {
+            text-align: center;
+            margin-top: 0;
+        }
+        .main-layout {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .visual-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        .cylinder-axis {
+            position: relative;
+            width: 60px;
+            height: 250px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            border: 2px solid #dfe1e6;
+        }
+        canvas {
+            border-radius: 6px;
+            display: block;
+        }
+        .indicator-arrow {
+            position: absolute;
+            left: 65px;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-right: 8px solid #333;
+            transform: translateY(-50%);
+            transition: top 0.1s ease;
+        }
+        .controls {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+        }
+        .swatch-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            font-weight: bold;
+            font-size: 1.1em;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .swatch {
+            width: 60px;
+            height: 60px;
+            border-radius: 8px;
+            border: 2px solid #dfe1e6;
+            box-shadow: inset 0 0 4px rgba(0,0,0,0.1);
+            transition: background-color 0.1s;
+        }
+        .explanation {
+            font-size: 0.9em;
+            color: #5e6c84;
+            line-height: 1.4;
+            background: #e9ecef;
+            padding: 12px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>HSV Cylindrical Model: Height (Value)</h2>
+    
+    <div class="main-layout">
+        <!-- Visual rendering of the vertical axis -->
+        <div class="visual-area">
+            <span style="font-size: 0.8em; font-weight: bold; color: #5e6c84;">Top (100%)</span>
+            <div class="cylinder-axis">
+                <canvas id="axisCanvas" width="60" height="250"></canvas>
+                <div id="indicator" class="indicator-arrow"></div>
+            </div>
+            <span style="font-size: 0.8em; font-weight: bold; color: #5e6c84;">Bottom (0%)</span>
+        </div>
+
+        <div class="controls">
+            <!-- Hue Slider -->
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span>Hue (Angle)</span>
+                    <span id="hueVal">200°</span>
+                </div>
+                <input type="range" id="hueSlider" min="0" max="360" value="200">
+            </div>
+
+            <!-- Saturation Slider -->
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span>Saturation (Radius)</span>
+                    <span id="satVal">100%</span>
+                </div>
+                <input type="range" id="satSlider" min="0" max="100" value="100">
+            </div>
+
+            <!-- Value Slider (Brightness) -->
+            <div class="slider-group">
+                <div class="slider-header">
+                    <span style="color: #0052cc;">Value (Height/Brightness)</span>
+                    <span id="valVal" style="color: #0052cc;">100%</span>
+                </div>
+                <input type="range" id="valSlider" min="0" max="100" value="100">
+            </div>
+
+            <div class="swatch-container">
+                <span>Final Output:</span>
+                <div id="colorSwatch" class="swatch"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="explanation">
+        <strong>Try this experiment:</strong> Set <strong>Saturation to 0%</strong> (moving to the center of the cylinder). Notice how the vertical axis turns into a pure grayscale gradient. This visually proves that the absolute center of the HSV cylinder goes from pitch black at the bottom to pure white at the top, completely void of color!
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('axisCanvas');
+    const ctx = canvas.getContext('2d');
+    const indicator = document.getElementById('indicator');
+    
+    const hueSlider = document.getElementById('hueSlider');
+    const satSlider = document.getElementById('satSlider');
+    const valSlider = document.getElementById('valSlider');
+    
+    const hueVal = document.getElementById('hueVal');
+    const satVal = document.getElementById('satVal');
+    const valVal = document.getElementById('valVal');
+    
+    const swatch = document.getElementById('colorSwatch');
+
+    // Helper: Convert HSV to RGB for accurate Canvas/CSS rendering
+    // CSS natively supports HSL, but HSL and HSV are mathematically different.
+    function hsvToRgb(h, s, v) {
+        s = s / 100;
+        v = v / 100;
+        
+        let c = v * s;
+        let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+        let m = v - c;
+        
+        let r = 0, g = 0, b = 0;
+        
+        if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+        else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+        else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+        else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+        else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+        else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+        
+        return `rgb(${Math.round((r + m) * 255)}, ${Math.round((g + m) * 255)}, ${Math.round((b + m) * 255)})`;
+    }
+
+    function drawAxis(h, s) {
+        // The top of the cylinder is max brightness (V=100)
+        const topColor = hsvToRgb(h, s, 100);
+        // The bottom of the cylinder is pitch black (V=0)
+        const bottomColor = hsvToRgb(h, s, 0); 
+        
+        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, topColor);
+        gradient.addColorStop(1, bottomColor);
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function updateVisuals() {
+        const h = parseInt(hueSlider.value);
+        const s = parseInt(satSlider.value);
+        const v = parseInt(valSlider.value);
+        
+        // Update Text Labels
+        hueVal.innerText = `${h}°`;
+        satVal.innerText = `${s}%`;
+        valVal.innerText = `${v}%`;
+        
+        // Draw the vertical gradient bar for the current Hue/Sat
+        drawAxis(h, s);
+        
+        // Move the indicator arrow (0% is bottom, 100% is top)
+        // Convert the V percentage into a Y-pixel coordinate
+        const indicatorY = canvas.height - ((v / 100) * canvas.height);
+        indicator.style.top = `${indicatorY}px`;
+        
+        // Update final swatch color
+        swatch.style.backgroundColor = hsvToRgb(h, s, v);
+    }
+
+    // Event listeners
+    hueSlider.addEventListener('input', updateVisuals);
+    satSlider.addEventListener('input', updateVisuals);
+    valSlider.addEventListener('input', updateVisuals);
+
+    // Initial render
+    updateVisuals();
+</script>
+
+</body>
+</html>
