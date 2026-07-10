@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSV 3D Cylinder</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #111; /* Dark background makes colors pop */
+            color: #fff;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        .ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 320px;
+            background: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        .hint {
+            font-size: 0.8em;
+            color: #aaa;
+            line-height: 1.4;
+            margin-top: 15px;
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9em;
+            color: #ccc;
+            cursor: pointer;
+        }
+        /* Loader */
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5em;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+    </style>
+    <!-- Import Three.js and OrbitControls from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="loader">Generating 3D Cylinder...</div>
+    <div id="canvas-container"></div>
+
+    <div class="ui-panel">
+        <h2>HSV 3D Color Space</h2>
+        
+        <div class="control-group">
+            <div class="control-header">
+                <span>Hue Cutaway (Angle)</span>
+                <span id="hueVal">360°</span>
+            </div>
+            <input type="range" id="hueCutoff" min="0" max="360" value="360">
+        </div>
+
+        <div class="control-group">
+            <div class="control-header">
+                <span>Value Minimum (Brightness)</span>
+                <span id="valVal">0%</span>
+            </div>
+            <input type="range" id="valCutoff" min="0" max="100" value="0">
+        </div>
+        
+        <div class="control-group">
+            <div class="control-header">
+                <span>Saturation Minimum (Radius)</span>
+                <span id="satVal">0%</span>
+            </div>
+            <input type="range" id="satCutoff" min="0" max="100" value="0">
+        </div>
+
+        <label class="checkbox-group">
+            <input type="checkbox" id="autoRotate" checked>
+            Auto-Rotate Camera
+        </label>
+
+        <div class="hint">
+            <strong>Controls:</strong> Click and drag to orbit. Scroll to zoom.<br><br>
+            <strong>Experiment:</strong> Lower the <em>Hue Cutaway</em> to 180° to slice the cylinder in half. Look at the central axis—it is a pure grayscale gradient from black to white!
+        </div>
+    </div>
+
+    <script>
+        window.onload = function() {
+            init3D();
+        };
+
+        function hsvToRgb(h, s, v) {
+            let c = v * s;
+            let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+            let m = v - c;
+            let r = 0, g = 0, b = 0;
+            
+            if (h >= 0 && h < 60) { r = c; g = x; b = 0; }
+            else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
+            else if (h >= 120 && h < 180) { r = 0; g = c; b = x; }
+            else if (h >= 180 && h < 240) { r = 0; g = x; b = c; }
+            else if (h >= 240 && h < 300) { r = x; g = 0; b = c; }
+            else if (h >= 300 && h < 360) { r = c; g = 0; b = x; }
+            
+            return { r: r + m, g: g + m, b: b + m };
+        }
+
+        function init3D() {
+            // Setup Scene, Camera, Renderer
+            const container = document.getElementById('canvas-container');
+            const scene = new THREE.Scene();
+            
+            const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(12, 10, 15);
+            
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Setup Orbit Controls
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Generate Point Cloud Data
+            const numPoints = 80000;
+            const radiusMax = 5;
+            const heightMax = 10;
+            
+            // Store raw data to allow fast filtering on the CPU
+            const rawData = new Float32Array(numPoints * 3); // H, S, V
+            
+            for (let i = 0; i < numPoints; i++) {
+                rawData[i * 3] = Math.random() * 360;      // Hue (0-360)
+                rawData[i * 3 + 1] = Math.random();        // Saturation (0-1)
+                rawData[i * 3 + 2] = Math.random();        // Value (0-1)
+            }
+
+            // Create Geometry and Material
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(numPoints * 3);
+            const colors = new Float32Array(numPoints * 3);
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.15,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.9,
+                sizeAttenuation: true
+            });
+
+            const pointCloud = new THREE.Points(geometry, material);
+            scene.add(pointCloud);
+
+            // Add Central Axis Line (Grayscale indicator)
+            const axisGeo = new THREE.BufferGeometry();
+            const axisPos = new Float32Array([0, -heightMax/2, 0, 0, heightMax/2, 0]);
+            const axisCol = new Float32Array([0, 0, 0, 1, 1, 1]); // Black to White
+            axisGeo.setAttribute('position', new THREE.BufferAttribute(axisPos, 3));
+            axisGeo.setAttribute('color', new THREE.BufferAttribute(axisCol, 3));
+            const axisMat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2 });
+            const axisLine = new THREE.Line(axisGeo, axisMat);
+            scene.add(axisLine);
+
+            // UI Elements
+            const hueSlider = document.getElementById('hueCutoff');
+            const valSlider = document.getElementById('valCutoff');
+            const satSlider = document.getElementById('satCutoff');
+            const autoRotateCb = document.getElementById('autoRotate');
+
+            // Update Geometry based on Filters
+            function updatePointCloud() {
+                const maxHue = parseFloat(hueSlider.value);
+                const minVal = parseFloat(valSlider.value) / 100;
+                const minSat = parseFloat(satSlider.value) / 100;
+
+                document.getElementById('hueVal').innerText = maxHue + '°';
+                document.getElementById('valVal').innerText = (minVal * 100).toFixed(0) + '%';
+                document.getElementById('satVal').innerText = (minSat * 100).toFixed(0) + '%';
+
+                let visibleCount = 0;
+
+                for (let i = 0; i < numPoints; i++) {
+                    const h = rawData[i * 3];
+                    const s = rawData[i * 3 + 1];
+                    const v = rawData[i * 3 + 2];
+
+                    if (h <= maxHue && v >= minVal && s >= minSat) {
+                        const r = s * radiusMax;
+                        const theta = h * (Math.PI / 180);
+                        
+                        // Map to X, Y, Z
+                        const x = r * Math.cos(theta);
+                        const y = (v - 0.5) * heightMax; // Center on origin
+                        const z = r * Math.sin(theta);
+                        
+                        positions[visibleCount * 3] = x;
+                        positions[visibleCount * 3 + 1] = y;
+                        positions[visibleCount * 3 + 2] = z;
+
+                        // Calculate RGB color
+                        const rgb = hsvToRgb(h, s, v);
+                        colors[visibleCount * 3] = rgb.r;
+                        colors[visibleCount * 3 + 1] = rgb.g;
+                        colors[visibleCount * 3 + 2] = rgb.b;
+
+                        visibleCount++;
+                    }
+                }
+
+                geometry.attributes.position.needsUpdate = true;
+                geometry.attributes.color.needsUpdate = true;
+                geometry.setDrawRange(0, visibleCount);
+            }
+
+            // Bind Events
+            hueSlider.addEventListener('input', updatePointCloud);
+            valSlider.addEventListener('input', updatePointCloud);
+            satSlider.addEventListener('input', updatePointCloud);
+            
+            // Handle Window Resize
+            window.addEventListener('resize', onWindowResize, false);
+            function onWindowResize() {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            // Remove Loader & run initial update
+            document.getElementById('loader').style.opacity = 0;
+            updatePointCloud();
+
+            // Animation Loop
+            function animate() {
+                requestAnimationFrame(animate);
+                
+                if (autoRotateCb.checked) {
+                    // Slowly rotate the scene
+                    scene.rotation.y += 0.002;
+                }
+                
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+    </script>
+</body>
+</html>
