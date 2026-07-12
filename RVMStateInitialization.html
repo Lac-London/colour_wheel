@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RVM Recurrent State Initialization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        .pipeline-container {
+            position: relative;
+            min-height: 450px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 40px;
+            background: #1e293b;
+            border-radius: 12px;
+            border: 1px solid #334155;
+            overflow: hidden;
+        }
+
+        /* 3D Pyramid Base Styles */
+        .pyramid-level {
+            position: absolute;
+            background: rgba(56, 189, 248, 0.1);
+            border: 2px solid #38bdf8;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #38bdf8;
+            opacity: 0;
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: rotateX(60deg) rotateZ(-45deg) translateZ(0px) scale(0.5);
+            transform-style: preserve-3d;
+            box-shadow: inset 0 0 20px rgba(56, 189, 248, 0.2);
+        }
+
+        .pyramid-level.active {
+            opacity: 1;
+            transform: rotateX(60deg) rotateZ(-45deg) translateZ(var(--z-offset)) scale(1);
+        }
+
+        /* Create 3D depth by adding pseudo-elements */
+        .pyramid-level::before, .pyramid-level::after {
+            content: '';
+            position: absolute;
+            background: rgba(56, 189, 248, 0.2);
+            border: 1px solid #0284c7;
+        }
+
+        /* Left wall */
+        .pyramid-level::before {
+            width: var(--depth);
+            height: 100%;
+            left: calc(var(--depth) * -1);
+            top: 0;
+            transform-origin: right;
+            transform: rotateY(-90deg);
+        }
+
+        /* Bottom wall */
+        .pyramid-level::after {
+            width: 100%;
+            height: var(--depth);
+            bottom: calc(var(--depth) * -1);
+            left: 0;
+            transform-origin: top;
+            transform: rotateX(-90deg);
+        }
+
+        .level-label {
+            position: absolute;
+            transform: rotateZ(45deg) rotateX(-60deg) translateY(-20px);
+            font-size: 0.75rem;
+            color: #bae6fd;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            white-space: nowrap;
+        }
+
+        /* C++ Code highlighting */
+        .code-line {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .code-line:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .code-line.active {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: #10b981;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+        }
+
+        /* ONNX Tensor Container */
+        .onnx-tensor {
+            width: 200px;
+            height: 280px;
+            background: #0f172a;
+            border: 2px dashed #64748b;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            position: relative;
+            z-index: 10;
+            transition: all 0.5s;
+        }
+
+        .onnx-tensor.ready {
+            border: 2px solid #10b981;
+            background: rgba(16, 185, 129, 0.05);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+        }
+
+        .tensor-slot {
+            width: 100%;
+            flex: 1;
+            margin: 4px 0;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            color: #64748b;
+            transition: all 0.3s;
+        }
+
+        .tensor-slot.filled {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: #38bdf8;
+            color: #bae6fd;
+            font-weight: bold;
+        }
+
+        .data-packet {
+            position: absolute;
+            background: #38bdf8;
+            color: #0f172a;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary { background: #10b981; color: white; box-shadow: 0 4px 0 #059669; }
+        .btn-primary:hover:not(:disabled) { transform: translateY(2px); box-shadow: 0 2px 0 #059669; }
+        .btn-primary:active:not(:disabled) { transform: translateY(4px); box-shadow: none; }
+        .btn-primary:disabled { background: #64748b; box-shadow: 0 4px 0 #475569; cursor: not-allowed; opacity: 0.7; }
+        
+        .btn-secondary { background: #334155; color: white; border: 1px solid #475569;}
+        .btn-secondary:hover:not(:disabled) { background: #475569; }
+
+        .explanation {
+            background: #0f172a;
+            border-left: 4px solid #10b981;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #cbd5e1;
+            min-height: 80px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="max-w-[1200px] w-full flex flex-col gap-6">
+    
+    <div class="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
+        <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-bold text-emerald-400">Memory Initialization: C++ to ONNX</h2>
+                <p class="text-sm text-slate-400">Allocating the 4 ConvGRU hidden states before Frame 1.</p>
+            </div>
+            <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-sky-400 border border-slate-700">
+                Resolution: H=1080, W=1920
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row">
+            
+            <!-- Code Panel -->
+            <div class="lg:w-5/12 bg-slate-950 p-6 flex flex-col border-r border-slate-700 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-xs text-slate-500 code-font ml-2">rvm_pipeline.cpp</span>
+                </div>
+                
+                <div class="w-full flex-grow overflow-x-auto">
+                    <pre class="code-font text-[13px] leading-relaxed text-slate-300 space-y-1">
+<span class="text-slate-500">// 1. Allocate Raw C++ Memory (Zeroed)</span>
+<div id="c-r1i" class="code-line"><span class="text-purple-400">std::vector</span>&lt;<span class="text-sky-300">float</span>&gt; r1i(1*16 * <span class="text-orange-300">540*960</span>,   <span class="text-emerald-400">0.0f</span>);</div><div id="c-r2i" class="code-line"><span class="text-purple-400">std::vector</span>&lt;<span class="text-sky-300">float</span>&gt; r2i(1*24 * <span class="text-orange-300">270*480</span>,   <span class="text-emerald-400">0.0f</span>);</div><div id="c-r3i" class="code-line"><span class="text-purple-400">std::vector</span>&lt;<span class="text-sky-300">float</span>&gt; r3i(1*48 * <span class="text-orange-300">135*240</span>,   <span class="text-emerald-400">0.0f</span>);</div><div id="c-r4i" class="code-line"><span class="text-purple-400">std::vector</span>&lt;<span class="text-sky-300">float</span>&gt; r4i(1*64 * <span class="text-orange-300">67*120</span>,    <span class="text-emerald-400">0.0f</span>);</div>
+<span class="text-slate-500">// 2. Create Ort Memory Info</span>
+<span class="text-purple-400">auto</span> mem_info = <span class="text-blue-400">Ort::MemoryInfo::CreateCpu</span>(
+    OrtDeviceAllocator, OrtMemTypeCPU
+);
+
+<span class="text-slate-500">// 3. Wrap C++ pointers into ONNX Tensors</span>
+<div id="c-t1" class="code-line"><span class="text-purple-400">Ort::Value</span> t1 = <span class="text-blue-400">Ort::Value::CreateTensor</span>&lt;<span class="text-sky-300">float</span>&gt;(
+    mem_info, r1i.<span class="text-pink-400">data</span>(), r1i.size(), ...);</div><div id="c-t2" class="code-line"><span class="text-purple-400">Ort::Value</span> t2 = <span class="text-blue-400">Ort::Value::CreateTensor</span>&lt;<span class="text-sky-300">float</span>&gt;(
+    mem_info, r2i.<span class="text-pink-400">data</span>(), r2i.size(), ...);</div><div id="c-t3" class="code-line"><span class="text-purple-400">Ort::Value</span> t3 = <span class="text-blue-400">Ort::Value::CreateTensor</span>&lt;<span class="text-sky-300">float</span>&gt;(
+    mem_info, r3i.<span class="text-pink-400">data</span>(), r3i.size(), ...);</div><div id="c-t4" class="code-line"><span class="text-purple-400">Ort::Value</span> t4 = <span class="text-blue-400">Ort::Value::CreateTensor</span>&lt;<span class="text-sky-300">float</span>&gt;(
+    mem_info, r4i.<span class="text-pink-400">data</span>(), r4i.size(), ...);</div></pre>
+                </div>
+            </div>
+
+            <!-- Visualization Panel -->
+            <div class="lg:w-7/12 p-6 bg-slate-800 flex flex-col justify-between">
+                
+                <div class="pipeline-container" id="viz-area">
+                    
+                    <!-- Left: C++ Heap Memory (The 3D Feature Pyramid) -->
+                    <div class="w-1/2 h-full relative" style="perspective: 1000px;">
+                        <div class="absolute top-2 left-2 text-xs font-bold text-slate-500 uppercase tracking-wider">C++ std::vector (CPU RAM)</div>
+                        
+                        <!-- Center anchor for pyramid -->
+                        <div class="absolute top-1/2 left-1/2 w-0 h-0" style="transform: translate(-50%, -50%);">
+                            
+                            <!-- r1i: Wide, short (16 channels) -->
+                            <div id="pyr-r1i" class="pyramid-level" style="width: 160px; height: 160px; margin-left: -80px; margin-top: -80px; --z-offset: -60px; --depth: 10px;">
+                                <div class="level-label">r1i (1/2 Res)<br><span style="color:#fcd34d">16 Channels</span></div>
+                            </div>
+                            
+                            <!-- r2i: Medium, deeper (24 channels) -->
+                            <div id="pyr-r2i" class="pyramid-level" style="width: 120px; height: 120px; margin-left: -60px; margin-top: -60px; --z-offset: 0px; --depth: 16px;">
+                                <div class="level-label">r2i (1/4 Res)<br><span style="color:#fcd34d">24 Channels</span></div>
+                            </div>
+
+                            <!-- r3i: Small, deeper (48 channels) -->
+                            <div id="pyr-r3i" class="pyramid-level" style="width: 80px; height: 80px; margin-left: -40px; margin-top: -40px; --z-offset: 60px; --depth: 32px;">
+                                <div class="level-label">r3i (1/8 Res)<br><span style="color:#fcd34d">48 Channels</span></div>
+                            </div>
+
+                            <!-- r4i: Tiny, deepest (64 channels) -->
+                            <div id="pyr-r4i" class="pyramid-level" style="width: 40px; height: 40px; margin-left: -20px; margin-top: -20px; --z-offset: 120px; --depth: 48px;">
+                                <div class="level-label">r4i (1/16 Res)<br><span style="color:#fcd34d">64 Channels</span></div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- Right: ONNX Tensor Array -->
+                    <div class="onnx-tensor" id="onnx-container">
+                        <div class="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-2">ONNX Input Array</div>
+                        <div id="slot-1" class="tensor-slot">Empty Slot</div>
+                        <div id="slot-2" class="tensor-slot">Empty Slot</div>
+                        <div id="slot-3" class="tensor-slot">Empty Slot</div>
+                        <div id="slot-4" class="tensor-slot">Empty Slot</div>
+                    </div>
+
+                    <!-- Animated Data Packet -->
+                    <div id="data-packet" class="data-packet code-font">ptr*</div>
+
+                </div>
+
+                <div class="controls">
+                    <button id="btn-alloc" class="btn-primary">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        1. Allocate C++ Vectors
+                    </button>
+                    <button id="btn-bind" class="btn-primary" disabled>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                        2. Bind ONNX Tensors
+                    </button>
+                    <button id="btn-reset" class="btn-secondary ml-auto">Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="explanation" id="expBox">
+        <strong>Status: Uninitialized.</strong> Before RVM can process Frame 1, we must manually create "blank" memory for its temporal feature pyramid. Click "Allocate C++ Vectors" to begin.
+    </div>
+
+</div>
+
+<script>
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // Elements
+    const btnAlloc = document.getElementById('btn-alloc');
+    const btnBind = document.getElementById('btn-bind');
+    const btnReset = document.getElementById('btn-reset');
+    const expBox = document.getElementById('expBox');
+    const packet = document.getElementById('data-packet');
+    const onnxContainer = document.getElementById('onnx-container');
+
+    // Code lines
+    const cLines = {
+        r1: document.getElementById('c-r1i'),
+        r2: document.getElementById('c-r2i'),
+        r3: document.getElementById('c-r3i'),
+        r4: document.getElementById('c-r4i'),
+        t1: document.getElementById('c-t1'),
+        t2: document.getElementById('c-t2'),
+        t3: document.getElementById('c-t3'),
+        t4: document.getElementById('c-t4')
+    };
+
+    // Pyramids & Slots
+    const pLevels = [
+        document.getElementById('pyr-r1i'),
+        document.getElementById('pyr-r2i'),
+        document.getElementById('pyr-r3i'),
+        document.getElementById('pyr-r4i')
+    ];
+    const slots = [
+        document.getElementById('slot-1'),
+        document.getElementById('slot-2'),
+        document.getElementById('slot-3'),
+        document.getElementById('slot-4')
+    ];
+
+    function resetUI() {
+        pLevels.forEach(p => p.classList.remove('active'));
+        slots.forEach(s => { s.classList.remove('filled'); s.innerText = 'Empty Slot'; });
+        Object.values(cLines).forEach(c => c.classList.remove('active'));
+        onnxContainer.classList.remove('ready');
+        packet.style.opacity = '0';
+        
+        btnAlloc.disabled = false;
+        btnBind.disabled = true;
+        
+        expBox.innerHTML = `<strong>Status: Uninitialized.</strong> Before RVM can process Frame 1, we must manually create "blank" memory for its temporal feature pyramid. Click "Allocate C++ Vectors" to begin.`;
+    }
+
+    async function allocateVectors() {
+        btnAlloc.disabled = true;
+        
+        // 1. Allocate r1i
+        cLines.r1.classList.add('active');
+        pLevels[0].classList.add('active');
+        expBox.innerHTML = `<strong>Allocating <code>r1i</code>:</strong> Half resolution ($1/2$). Massive spatial area, but shallow depth (16 channels). Memorizes fine details like hair edges.`;
+        await sleep(1000);
+        cLines.r1.classList.remove('active');
+
+        // 2. Allocate r2i
+        cLines.r2.classList.add('active');
+        pLevels[1].classList.add('active');
+        expBox.innerHTML = `<strong>Allocating <code>r2i</code>:</strong> Quarter resolution ($1/4$). Smaller area, slightly deeper (24 channels). Memorizes limbs and movement.`;
+        await sleep(1000);
+        cLines.r2.classList.remove('active');
+
+        // 3. Allocate r3i
+        cLines.r3.classList.add('active');
+        pLevels[2].classList.add('active');
+        expBox.innerHTML = `<strong>Allocating <code>r3i</code>:</strong> Eighth resolution ($1/8$). Deep features (48 channels).`;
+        await sleep(1000);
+        cLines.r3.classList.remove('active');
+
+        // 4. Allocate r4i
+        cLines.r4.classList.add('active');
+        pLevels[3].classList.add('active');
+        expBox.innerHTML = `<strong>Allocating <code>r4i</code>:</strong> Sixteenth resolution ($1/16$). Tiny spatial area, but massive depth (64 channels). Memorizes global context (e.g., "The human is standing on the left").`;
+        await sleep(1000);
+        cLines.r4.classList.remove('active');
+
+        expBox.innerHTML = `<strong>C++ Memory Allocated.</strong> The RAM now holds millions of <code>0.0f</code> values structured as a feature pyramid. We now need to wrap this RAM so the ONNX network can read it.`;
+        btnBind.disabled = false;
+    }
+
+    async function bindTensors() {
+        btnBind.disabled = true;
+        
+        for(let i=0; i<4; i++) {
+            const code = cLines[`t${i+1}`];
+            const pyr = pLevels[i];
+            const slot = slots[i];
+            
+            code.classList.add('active');
+            expBox.innerHTML = `<strong><code>Ort::Value::CreateTensor</code>:</strong> We tell ONNX exactly where our C++ <code>r${i+1}i.data()</code> pointer lives, and what shape the data is.`;
+
+            // Animate Packet from Pyramid to Slot
+            const pRect = pyr.getBoundingClientRect();
+            const sRect = slot.getBoundingClientRect();
+            const containerRect = document.getElementById('viz-area').getBoundingClientRect();
+            
+            // Start pos (center of pyramid level)
+            packet.style.transition = 'none';
+            packet.style.left = `${(pRect.left + pRect.width/2) - containerRect.left - 20}px`;
+            packet.style.top = `${(pRect.top + pRect.height/2) - containerRect.top - 10}px`;
+            packet.innerText = `ptr: r${i+1}i`;
+            
+            // Force reflow
+            void packet.offsetWidth;
+            
+            // Move to slot
+            packet.style.transition = 'all 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+            packet.style.opacity = '1';
+            packet.style.left = `${(sRect.left + sRect.width/2) - containerRect.left - 20}px`;
+            packet.style.top = `${(sRect.top + sRect.height/2) - containerRect.top - 10}px`;
+            
+            await sleep(600);
+            
+            packet.style.opacity = '0';
+            slot.classList.add('filled');
+            slot.innerText = `Ort Tensor: r${i+1}i`;
+            
+            await sleep(400);
+            code.classList.remove('active');
+        }
+
+        onnxContainer.classList.add('ready');
+        expBox.innerHTML = `<strong>Initialization Complete!</strong> 
+        <br><br><span style="color:#10b981; font-weight:bold;">Critical Note:</span> Because we used <code>CreateTensor</code> with our own data pointer, ONNX does <strong>not</strong> copy the memory! It creates a lightweight "wrapper" that reads directly from our C++ vectors. This "Zero-Copy" technique is vital for 60fps performance.`;
+    }
+
+    btnAlloc.addEventListener('click', allocateVectors);
+    btnBind.addEventListener('click', bindTensors);
+    btnReset.addEventListener('click', resetUI);
+
+</script>
+</body>
+</html>
