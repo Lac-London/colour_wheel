@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU VRAM Bottleneck Simulator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f5f7;
+            padding: 20px;
+            color: #333;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .header { text-align: center; }
+        .header h2 { margin: 0 0 5px 0; color: #172b4d; }
+        .header p { margin: 0; color: #5e6c84; font-size: 0.95em; }
+
+        .scoreboard {
+            display: flex;
+            justify-content: space-around;
+            background: #253858;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .score-item {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+        }
+        .score-label { font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px; color: #879abf; }
+        .score-val { font-size: 1.8em; font-weight: bold; font-family: "Courier New", Courier, monospace; }
+        .score-val.danger { color: #ff5630; }
+        .score-val.good { color: #36b37e; }
+
+        .hardware-container {
+            display: flex;
+            align-items: stretch;
+            justify-content: space-between;
+            background: #fafbfc;
+            border: 1px solid #dfe1e6;
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            height: 250px;
+        }
+        
+        .component {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            width: 140px;
+            border-radius: 8px;
+            padding: 15px 10px;
+            position: relative;
+            z-index: 2;
+        }
+        .vram {
+            background: #e6fcff;
+            border: 2px solid #00b8d9;
+            box-shadow: 0 4px 0 #008da6;
+        }
+        .cores {
+            background: #eafff5;
+            border: 2px solid #36b37e;
+            box-shadow: 0 4px 0 #208759;
+        }
+        .comp-title { font-weight: bold; margin-bottom: 5px; text-align: center; }
+        .comp-desc { font-size: 0.75em; text-align: center; color: #5e6c84; }
+
+        .memory-bus {
+            flex-grow: 1;
+            margin: 0 20px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-top: 4px dashed #c1c7d0;
+            border-bottom: 4px dashed #c1c7d0;
+            background: rgba(94, 108, 132, 0.05);
+        }
+        .bus-label {
+            position: absolute;
+            top: -25px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: #ff5630;
+            text-transform: uppercase;
+        }
+
+        .data-packet {
+            width: 30px;
+            height: 30px;
+            background: #0052cc;
+            border-radius: 4px;
+            position: absolute;
+            left: 20px; /* Start at VRAM */
+            top: 50%;
+            transform: translateY(-50%);
+            box-shadow: 0 0 10px #0052cc;
+            opacity: 0;
+            transition: left 0.6s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.7em;
+            font-weight: bold;
+        }
+
+        .kernel-display {
+            margin-top: auto;
+            width: 100%;
+            height: 80px;
+            background: rgba(255,255,255,0.8);
+            border: 1px dashed #36b37e;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: #172b4d;
+            padding: 5px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .kernel-display.active {
+            background: #36b37e;
+            color: white;
+            transform: scale(1.05);
+            border-style: solid;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-naive { background: #ff5630; color: white; box-shadow: 0 3px 0 #bf381a; }
+        .btn-naive:hover:not(:disabled) { transform: translateY(1px); box-shadow: 0 2px 0 #bf381a; }
+        .btn-naive:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+        
+        .btn-trt { background: #0052cc; color: white; box-shadow: 0 3px 0 #003e99; }
+        .btn-trt:hover:not(:disabled) { transform: translateY(1px); box-shadow: 0 2px 0 #003e99; }
+        .btn-trt:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+
+        .explanation {
+            background: #e6fcff;
+            border-left: 4px solid #0052cc;
+            padding: 16px;
+            border-radius: 4px;
+            min-height: 50px;
+            font-size: 0.95em;
+            color: #172b4d;
+            line-height: 1.5;
+        }
+        .log { font-family: "Courier New", Courier, monospace; color: #ff5630; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>Hardware Traffic: Naive vs TensorRT</h2>
+        <p>Visualizing the physical movement of data across the GPU Memory Bus</p>
+    </div>
+
+    <div class="scoreboard">
+        <div class="score-item">
+            <span class="score-label">VRAM Reads</span>
+            <span class="score-val" id="valReads">0</span>
+        </div>
+        <div class="score-item">
+            <span class="score-label">VRAM Writes</span>
+            <span class="score-val" id="valWrites">0</span>
+        </div>
+        <div class="score-item">
+            <span class="score-label">Kernels Launched</span>
+            <span class="score-val" id="valKernels">0</span>
+        </div>
+    </div>
+
+    <div class="hardware-container">
+        <!-- VRAM (Left) -->
+        <div class="component vram" id="vramBox">
+            <div class="comp-title">Global VRAM</div>
+            <div class="comp-desc">Massive 24GB Pool<br>(Extremely Slow)</div>
+        </div>
+
+        <!-- The Memory Bus (Middle) -->
+        <div class="memory-bus" id="busBox">
+            <div class="bus-label">Memory Bus Bottleneck</div>
+            <div class="data-packet" id="packet">IMG</div>
+        </div>
+
+        <!-- GPU Cores (Right) -->
+        <div class="component cores" id="coresBox">
+            <div class="comp-title">GPU Cores</div>
+            <div class="comp-desc">Ultra-Fast Registers<br>(L1 Cache)</div>
+            <div class="kernel-display" id="kernelScreen">Idle</div>
+        </div>
+    </div>
+
+    <div class="explanation" id="expBox">
+        Waiting to run simulation... Click a button below.
+    </div>
+
+    <div class="controls">
+        <button class="btn-naive" id="btnNaive">Run Naive PyTorch</button>
+        <button class="btn-trt" id="btnTrt">Run TensorRT Fused</button>
+    </div>
+</div>
+
+<script>
+    const valReads = document.getElementById('valReads');
+    const valWrites = document.getElementById('valWrites');
+    const valKernels = document.getElementById('valKernels');
+    const packet = document.getElementById('packet');
+    const kernelScreen = document.getElementById('kernelScreen');
+    const expBox = document.getElementById('expBox');
+    
+    const btnNaive = document.getElementById('btnNaive');
+    const btnTrt = document.getElementById('btnTrt');
+
+    // State Variables
+    let reads = 0;
+    let writes = 0;
+    let kernels = 0;
+
+    // Helper: Sleep for animation timing
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Reset the UI
+    function resetUI() {
+        reads = 0; writes = 0; kernels = 0;
+        updateScores();
+        packet.style.opacity = 0;
+        packet.style.left = '20px';
+        kernelScreen.innerText = "Idle";
+        kernelScreen.className = "kernel-display";
+        
+        valReads.className = "score-val";
+        valWrites.className = "score-val";
+        valKernels.className = "score-val";
+    }
+
+    function updateScores() {
+        valReads.innerText = reads;
+        valWrites.innerText = writes;
+        valKernels.innerText = kernels;
+    }
+
+    async function moveData(direction, label) {
+        packet.innerText = label;
+        packet.style.opacity = 1;
+        
+        if (direction === 'toCores') {
+            packet.style.left = '20px'; // Start VRAM
+            await sleep(50);
+            packet.style.left = 'calc(100% - 50px)'; // Move to Cores
+            await sleep(600); // Wait for transit
+            reads++;
+            updateScores();
+            packet.style.opacity = 0;
+        } else if (direction === 'toVram') {
+            packet.style.left = 'calc(100% - 50px)'; // Start Cores
+            await sleep(50);
+            packet.style.left = '20px'; // Move to VRAM
+            await sleep(600); // Wait for transit
+            writes++;
+            updateScores();
+            packet.style.opacity = 0;
+        }
+    }
+
+    async function executeKernel(kernelName, timeMs) {
+        kernels++;
+        updateScores();
+        kernelScreen.innerText = kernelName;
+        kernelScreen.classList.add('active');
+        await sleep(timeMs);
+        kernelScreen.classList.remove('active');
+        kernelScreen.innerText = "Waiting...";
+        await sleep(200);
+    }
+
+    async function runNaive() {
+        btnNaive.disabled = true;
+        btnTrt.disabled = true;
+        resetUI();
+
+        expBox.innerHTML = "<strong>Step 1: Convolution Kernel</strong><br><span class='log'>[TRAFFIC] Reading image across bus...</span>";
+        await moveData('toCores', 'IMG');
+        await executeKernel("Conv Kernel", 500);
+        expBox.innerHTML = "<strong>Step 1: Convolution Kernel</strong><br><span class='log'>[TRAFFIC] Writing intermediate output to VRAM...</span>";
+        await moveData('toVram', 'OUT1');
+
+        expBox.innerHTML = "<strong>Step 2: Add Bias Kernel</strong><br><span class='log'>[TRAFFIC] Reading intermediate output BACK across bus...</span>";
+        await moveData('toCores', 'OUT1');
+        await executeKernel("Bias Kernel", 500);
+        expBox.innerHTML = "<strong>Step 2: Add Bias Kernel</strong><br><span class='log'>[TRAFFIC] Writing second intermediate output to VRAM...</span>";
+        await moveData('toVram', 'OUT2');
+
+        expBox.innerHTML = "<strong>Step 3: ReLU Kernel</strong><br><span class='log'>[TRAFFIC] Reading second output BACK across bus... AGAIN.</span>";
+        await moveData('toCores', 'OUT2');
+        await executeKernel("ReLU Kernel", 500);
+        expBox.innerHTML = "<strong>Step 3: ReLU Kernel</strong><br><span class='log'>[TRAFFIC] Writing Final Result to VRAM.</span>";
+        await moveData('toVram', 'FINAL');
+
+        valReads.className = "score-val danger";
+        valWrites.className = "score-val danger";
+        valKernels.className = "score-val danger";
+
+        expBox.innerHTML = "<strong>Naive Complete.</strong> Look at the scoreboard. The GPU cores had to wait for the slow memory bus 6 separate times just to do three simple math operations!";
+        
+        btnNaive.disabled = false;
+        btnTrt.disabled = false;
+    }
+
+    async function runTrt() {
+        btnNaive.disabled = true;
+        btnTrt.disabled = true;
+        resetUI();
+
+        expBox.innerHTML = "<strong>TensorRT Fused Kernel</strong><br><span class='log'>[TRAFFIC] Reading image across bus ONCE...</span>";
+        await moveData('toCores', 'IMG');
+        
+        expBox.innerHTML = "<strong>TensorRT Fused Kernel</strong><br><span style='color:#36b37e; font-weight:bold;'>[FAST COMPUTE] Conv -> Bias -> ReLU happening instantly in private registers. No VRAM traffic!</span>";
+        await executeKernel("Fused Kernel:\nConv -> Bias -> ReLU", 1200);
+        
+        expBox.innerHTML = "<strong>TensorRT Fused Kernel</strong><br><span class='log'>[TRAFFIC] Writing Final Result to VRAM ONCE.</span>";
+        await moveData('toVram', 'FINAL');
+
+        valReads.className = "score-val good";
+        valWrites.className = "score-val good";
+        valKernels.className = "score-val good";
+
+        expBox.innerHTML = "<strong>TensorRT Complete.</strong> By mathematically fusing the kernels, TensorRT eliminated 66% of the memory bandwidth traffic. The Memory Bus is no longer a bottleneck!";
+        
+        btnNaive.disabled = false;
+        btnTrt.disabled = false;
+    }
+
+    btnNaive.addEventListener('click', runNaive);
+    btnTrt.addEventListener('click', runTrt);
+
+</script>
+</body>
+</html>
