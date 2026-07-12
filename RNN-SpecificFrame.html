@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RNN Math Equation Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        .node-box {
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            position: relative;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 120px;
+            z-index: 10;
+        }
+
+        .node-box .label { font-size: 0.75rem; color: #94a3b8; font-weight: 600; text-transform: uppercase; margin-bottom: 5px; }
+        .node-box .math { font-size: 1.25rem; font-weight: bold; }
+        .node-box .subtext { font-size: 0.7rem; color: #64748b; margin-top: 5px; }
+
+        /* Specific node colors */
+        .node-input { border-color: #0284c7; box-shadow: 0 0 15px rgba(2, 132, 199, 0.2); }
+        .node-input .math { color: #38bdf8; }
+        
+        .node-memory { border-color: #ea580c; box-shadow: 0 0 15px rgba(234, 88, 12, 0.2); }
+        .node-memory .math { color: #fb923c; }
+
+        .node-op { border-color: #475569; background: #0f172a; min-width: 60px; height: 60px; border-radius: 50%; }
+        .node-op .math { color: #cbd5e1; }
+
+        .node-output { border-color: #16a34a; box-shadow: 0 0 20px rgba(22, 163, 74, 0.3); }
+        .node-output .math { color: #4ade80; }
+
+        /* Arrow connectors */
+        .path-line {
+            position: absolute;
+            background: #475569;
+            z-index: 1;
+        }
+        .path-line.h { height: 2px; }
+        .path-line.v { width: 2px; }
+
+        /* SVG Tanh curve */
+        .tanh-graph {
+            width: 140px;
+            height: 80px;
+            background: #0f172a;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            margin-top: 10px;
+            position: relative;
+        }
+        
+        /* Custom range slider styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px; width: 16px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #334155;
+            border-radius: 2px;
+        }
+        input[type=range]:focus { outline: none; }
+        
+        /* Loop Animation */
+        @keyframes pulse-border {
+            0% { border-color: #16a34a; box-shadow: 0 0 20px rgba(22, 163, 74, 0.3); }
+            50% { border-color: #fb923c; box-shadow: 0 0 30px rgba(251, 146, 60, 0.6); transform: scale(1.05); }
+            100% { border-color: #ea580c; box-shadow: 0 0 20px rgba(234, 88, 12, 0.3); }
+        }
+        .anim-loop { animation: pulse-border 0.8s ease-in-out; }
+    </style>
+</head>
+<body>
+
+<div class="max-w-5xl w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-5 border-b border-slate-700 text-center relative">
+        <h2 class="text-2xl font-bold text-sky-400 mb-2">Vanilla RNN Cell Visualizer</h2>
+        <div class="flex flex-col items-center gap-3">
+            <div class="text-xl code-font text-slate-300 bg-slate-950 inline-block px-6 py-3 rounded-lg border border-slate-800 shadow-inner">
+                <span class="text-emerald-400">h_t</span> = <span class="text-purple-400">tanh</span>( <span class="text-orange-400">W_hh</span> * <span class="text-orange-400">h_{t-1}</span> + <span class="text-sky-400">W_xh</span> * <span class="text-sky-400">x_t</span> + <span class="text-pink-400">b_h</span> )
+            </div>
+            <div class="text-xl code-font text-slate-300 bg-slate-950 inline-block px-6 py-3 rounded-lg border border-slate-800 shadow-inner">
+                <span class="text-red-400">y_t</span> = <span class="text-yellow-400">W_hy</span> * <span class="text-emerald-400">h_t</span> + <span class="text-yellow-400">b_y</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Visualization Area -->
+    <div class="p-8 bg-slate-900 relative overflow-hidden flex flex-col items-center">
+        
+        <!-- Top Row: Memory & Input -->
+        <div class="flex justify-center w-full gap-24 relative z-10">
+            <!-- Previous Hidden State -->
+            <div class="flex flex-col items-center gap-4">
+                <div class="node-box node-memory" id="box-h-prev">
+                    <span class="label">Memory (t-1)</span>
+                    <span class="math code-font" id="val-h-prev">0.00</span>
+                    <span class="subtext">h_{t-1}</span>
+                </div>
+                <div class="text-slate-400 text-xl font-bold">×</div>
+                <div class="node-box border-orange-700">
+                    <span class="label">Memory Weight</span>
+                    <span class="math code-font text-orange-400" id="val-w-hh">0.50</span>
+                    <span class="subtext">W_{hh}</span>
+                </div>
+                <div class="text-slate-400 text-xl font-bold">||</div>
+                <div class="code-font text-orange-300 font-bold bg-orange-950 px-3 py-1 rounded border border-orange-900" id="val-hh-res">0.00</div>
+            </div>
+
+            <!-- Current Input -->
+            <div class="flex flex-col items-center gap-4">
+                <div class="node-box node-input">
+                    <span class="label">Current Input (t)</span>
+                    <span class="math code-font" id="val-x">1.00</span>
+                    <span class="subtext">x_t</span>
+                </div>
+                <div class="text-slate-400 text-xl font-bold">×</div>
+                <div class="node-box border-sky-700">
+                    <span class="label">Input Weight</span>
+                    <span class="math code-font text-sky-400" id="val-w-xh">1.00</span>
+                    <span class="subtext">W_{xh}</span>
+                </div>
+                <div class="text-slate-400 text-xl font-bold">||</div>
+                <div class="code-font text-sky-300 font-bold bg-sky-950 px-3 py-1 rounded border border-sky-900" id="val-xh-res">1.00</div>
+            </div>
+        </div>
+
+        <!-- Middle Row: Summation -->
+        <div class="mt-8 flex items-center justify-center gap-8 relative z-10">
+            <!-- Lines connecting from top to sum (visual only, simplified with flex layout) -->
+            <div class="node-box node-op border-slate-600">
+                <span class="math text-3xl">+</span>
+            </div>
+            
+            <div class="text-slate-400 text-3xl font-bold">+</div>
+            
+            <!-- Bias -->
+            <div class="node-box border-pink-700">
+                <span class="label">Bias</span>
+                <span class="math code-font text-pink-400" id="val-b">0.00</span>
+                <span class="subtext">b_h</span>
+            </div>
+
+            <div class="text-slate-400 text-3xl font-bold">=</div>
+
+            <!-- Raw Sum (z) -->
+            <div class="node-box border-slate-500 bg-slate-800">
+                <span class="label">Raw Sum (z)</span>
+                <span class="math code-font text-white" id="val-z">1.00</span>
+            </div>
+        </div>
+
+        <!-- Bottom Row: Activation & Output -->
+        <div class="mt-8 flex flex-col items-center relative z-10">
+            <div class="w-0.5 h-8 bg-slate-600 mb-4"></div>
+            
+            <div class="flex items-center gap-8">
+                <!-- Tanh Activation -->
+                <div class="node-box border-purple-700 bg-slate-950 relative">
+                    <span class="label text-purple-400">Activation Function</span>
+                    <span class="math code-font text-purple-300">tanh(z)</span>
+                    
+                    <!-- SVG Tanh Graph -->
+                    <svg class="tanh-graph" viewBox="0 0 140 80">
+                        <!-- Grid lines -->
+                        <line x1="0" y1="40" x2="140" y2="40" stroke="#334155" stroke-width="1"/>
+                        <line x1="70" y1="0" x2="70" y2="80" stroke="#334155" stroke-width="1"/>
+                        <!-- Tanh curve (drawn via JS) -->
+                        <path id="tanh-path" fill="none" stroke="#a855f7" stroke-width="2"/>
+                        <!-- Current value point -->
+                        <circle id="tanh-dot" cx="70" cy="40" r="4" fill="#ffffff" stroke="#c084fc" stroke-width="2"/>
+                    </svg>
+                </div>
+
+                <div class="text-slate-400 text-3xl font-bold">→</div>
+
+                <!-- Final Output -->
+                <div class="node-box node-output" id="box-h-new">
+                    <span class="label">New Memory (t)</span>
+                    <span class="math text-4xl code-font" id="val-h-new">0.76</span>
+                    <span class="subtext">h_t</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- NEW: Output Projection Row -->
+        <div class="mt-8 flex flex-col items-center relative z-10 w-full">
+            <div class="w-0.5 h-8 bg-slate-600 mb-4"></div>
+            
+            <div class="flex flex-wrap items-center justify-center gap-4 sm:gap-6 bg-slate-800/80 p-4 sm:p-6 rounded-xl border border-slate-600 shadow-lg relative">
+                <div class="absolute -top-3 left-4 bg-slate-900 px-2 text-xs font-bold text-slate-400 border border-slate-700 rounded">Output Layer</div>
+                
+                <div class="node-box border-emerald-600">
+                    <span class="label">Memory</span>
+                    <span class="math code-font text-emerald-400" id="val-ht-copy">0.76</span>
+                    <span class="subtext">h_t</span>
+                </div>
+                
+                <div class="text-slate-400 text-xl font-bold">×</div>
+                
+                <div class="node-box border-yellow-600">
+                    <span class="label text-yellow-400">Output Weight</span>
+                    <span class="math code-font text-yellow-400" id="val-w-hy">1.00</span>
+                    <span class="subtext">W_{hy}</span>
+                </div>
+                
+                <div class="text-slate-400 text-xl font-bold">+</div>
+                
+                <div class="node-box border-yellow-600">
+                    <span class="label text-yellow-400">Output Bias</span>
+                    <span class="math code-font text-yellow-400" id="val-b-y">0.00</span>
+                    <span class="subtext">b_y</span>
+                </div>
+                
+                <div class="text-slate-400 text-2xl font-bold mx-2">=</div>
+                
+                <div class="node-box border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] bg-slate-950">
+                    <span class="label text-red-400">Final Prediction</span>
+                    <span class="math text-4xl code-font text-red-400" id="val-y-t">0.76</span>
+                    <span class="subtext">y_t</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- The Time Loop Button -->
+        <div class="mt-12">
+            <button id="btn-step" class="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-bold text-lg transition-all shadow-[0_0_20px_rgba(16,185,129,0.4)] border border-emerald-400 flex items-center gap-3">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                Step Time Forward (t → t+1)
+            </button>
+        </div>
+    </div>
+
+    <!-- Controls Panel -->
+    <div class="bg-slate-950 p-6 border-t border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        <!-- Left Column: Current State Inputs -->
+        <div class="space-y-6 bg-slate-900 p-5 rounded-lg border border-slate-800">
+            <h3 class="text-sky-400 font-bold border-b border-slate-700 pb-2">Dynamic Inputs (Change every frame)</h3>
+            
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Current Input Data (x_t)</span>
+                    <span id="label-x" class="code-font text-sky-400">1.00</span>
+                </div>
+                <input type="range" id="slide-x" min="-3" max="3" step="0.1" value="1">
+            </div>
+
+            <div class="pt-4 opacity-50">
+                <div class="flex justify-between text-sm mb-1 text-slate-400">
+                    <span>Previous Memory (h_{t-1})</span>
+                    <span class="code-font">Read-Only</span>
+                </div>
+                <p class="text-xs text-slate-500">This is locked. It is entirely determined by the output of the previous time step.</p>
+            </div>
+        </div>
+
+        <!-- Right Column: Learned Weights (Network Parameters) -->
+        <div class="space-y-6 bg-slate-900 p-5 rounded-lg border border-slate-800">
+            <h3 class="text-purple-400 font-bold border-b border-slate-700 pb-2">Network Weights (Learned during training)</h3>
+            
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Input Weight (W_{xh})</span>
+                    <span id="label-w-xh" class="code-font text-sky-400">1.00</span>
+                </div>
+                <input type="range" id="slide-w-xh" min="-2" max="2" step="0.1" value="1">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Memory Weight (W_{hh})</span>
+                    <span id="label-w-hh" class="code-font text-orange-400">0.50</span>
+                </div>
+                <input type="range" id="slide-w-hh" min="-2" max="2" step="0.1" value="0.5">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Bias (b_h)</span>
+                    <span id="label-b" class="code-font text-pink-400">0.00</span>
+                </div>
+                <input type="range" id="slide-b" min="-2" max="2" step="0.1" value="0">
+            </div>
+            
+            <div class="w-full h-px bg-slate-700 my-4"></div>
+            
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Output Weight (W_{hy})</span>
+                    <span id="label-w-hy" class="code-font text-yellow-400">1.00</span>
+                </div>
+                <input type="range" id="slide-w-hy" min="-2" max="2" step="0.1" value="1">
+            </div>
+
+            <div>
+                <div class="flex justify-between text-sm mb-2 text-slate-300 font-semibold">
+                    <span>Output Bias (b_y)</span>
+                    <span id="label-b-y" class="code-font text-yellow-400">0.00</span>
+                </div>
+                <input type="range" id="slide-b-y" min="-2" max="2" step="0.1" value="0">
+            </div>
+        </div>
+    </div>
+    
+    <!-- Explanation Box -->
+    <div class="bg-slate-800 p-6 border-t border-slate-700 text-sm text-slate-300 leading-relaxed">
+        <p class="mb-2"><strong class="text-white">Why Tanh?</strong> Notice how the "Raw Sum (z)" can grow very large or very negative. If we just passed that number to the next frame, the values would explode to infinity after a few loops. The <code>tanh()</code> function safely "squishes" any incoming number to perfectly fit between <strong>-1.0 and 1.0</strong>, keeping the network's memory stable over time.</p>
+        <p class="mb-2"><strong class="text-white">The Output Projection:</strong> The hidden state <code>h_t</code> is the AI's abstract internal memory. It does not look like an alpha matte yet. To get our final, real-world prediction (like an Alpha Matte pixel <code>y_t</code>), the network uses a final set of weights (<code>W_hy</code>) and biases (<code>b_y</code>) to project the internal memory outward.</p>
+        <p><strong class="text-white">The Time Loop:</strong> When you click the <strong>Step Time</strong> button, you are simulating a video moving to the next frame. The <code>h_t</code> output physically becomes the <code>h_{t-1}</code> input for the next calculation. This is how the AI "remembers" what it saw in the past!</p>
+    </div>
+
+</div>
+
+<script>
+    // State variables
+    let h_prev = 0.00;
+    
+    // DOM Elements
+    const slideX = document.getElementById('slide-x');
+    const slideWxh = document.getElementById('slide-w-xh');
+    const slideWhh = document.getElementById('slide-w-hh');
+    const slideB = document.getElementById('slide-b');
+    const slideWhy = document.getElementById('slide-w-hy');
+    const slideBy = document.getElementById('slide-b-y');
+    
+    const valX = document.getElementById('val-x');
+    const valHprev = document.getElementById('val-h-prev');
+    const valWxh = document.getElementById('val-w-xh');
+    const valWhh = document.getElementById('val-w-hh');
+    const valB = document.getElementById('val-b');
+    const valWhy = document.getElementById('val-w-hy');
+    const valBy = document.getElementById('val-b-y');
+    
+    const labelX = document.getElementById('label-x');
+    const labelWxh = document.getElementById('label-w-xh');
+    const labelWhh = document.getElementById('label-w-hh');
+    const labelB = document.getElementById('label-b');
+    const labelWhy = document.getElementById('label-w-hy');
+    const labelBy = document.getElementById('label-b-y');
+    
+    const resXh = document.getElementById('val-xh-res');
+    const resHh = document.getElementById('val-hh-res');
+    const valZ = document.getElementById('val-z');
+    const valHnew = document.getElementById('val-h-new');
+    const valHtCopy = document.getElementById('val-ht-copy');
+    const valYt = document.getElementById('val-y-t');
+    
+    const tanhPath = document.getElementById('tanh-path');
+    const tanhDot = document.getElementById('tanh-dot');
+    
+    const btnStep = document.getElementById('btn-step');
+    const boxHprev = document.getElementById('box-h-prev');
+    const boxHnew = document.getElementById('box-h-new');
+
+    // Draw the static Tanh curve once
+    function drawTanhCurve() {
+        let d = "";
+        for(let px = 0; px <= 140; px += 2) {
+            // Map pixel X (0 to 140) to math X (-3.5 to 3.5 for good visual spread)
+            const mathX = (px / 140) * 7 - 3.5;
+            const mathY = Math.tanh(mathX);
+            // Map math Y (-1 to 1) to pixel Y (80 to 0)
+            const py = 40 - (mathY * 35); // 35 pixels = max amplitude
+            
+            if (px === 0) d += `M ${px} ${py} `;
+            else d += `L ${px} ${py} `;
+        }
+        tanhPath.setAttribute('d', d);
+    }
+    drawTanhCurve();
+
+    function updateMath() {
+        const x = parseFloat(slideX.value);
+        const w_xh = parseFloat(slideWxh.value);
+        const w_hh = parseFloat(slideWhh.value);
+        const b = parseFloat(slideB.value);
+        const w_hy = parseFloat(slideWhy.value);
+        const b_y = parseFloat(slideBy.value);
+        
+        // Update Labels
+        valX.innerText = x.toFixed(2);
+        labelX.innerText = x.toFixed(2);
+        
+        valWxh.innerText = w_xh.toFixed(2);
+        labelWxh.innerText = w_xh.toFixed(2);
+        
+        valWhh.innerText = w_hh.toFixed(2);
+        labelWhh.innerText = w_hh.toFixed(2);
+        
+        valB.innerText = b.toFixed(2);
+        labelB.innerText = b.toFixed(2);
+        
+        valWhy.innerText = w_hy.toFixed(2);
+        labelWhy.innerText = w_hy.toFixed(2);
+        
+        valBy.innerText = b_y.toFixed(2);
+        labelBy.innerText = b_y.toFixed(2);
+        
+        valHprev.innerText = h_prev.toFixed(2);
+
+        // Calculate intermediates
+        const xh_prod = x * w_xh;
+        const hh_prod = h_prev * w_hh;
+        const z = xh_prod + hh_prod + b;
+        const h_new = Math.tanh(z);
+        
+        // Final Output Projection
+        const y_t = (h_new * w_hy) + b_y;
+
+        // Update displays
+        resXh.innerText = xh_prod.toFixed(2);
+        resHh.innerText = hh_prod.toFixed(2);
+        valZ.innerText = z.toFixed(2);
+        valHnew.innerText = h_new.toFixed(2);
+        valHtCopy.innerText = h_new.toFixed(2);
+        valYt.innerText = y_t.toFixed(2);
+
+        // Update Tanh Dot Position
+        // Map math Z (-3.5 to 3.5) to pixel X (0 to 140)
+        let dotX = ((z + 3.5) / 7) * 140;
+        // Clamp to edges so it doesn't fly off SVG
+        dotX = Math.max(0, Math.min(140, dotX)); 
+        const dotY = 40 - (h_new * 35);
+        
+        tanhDot.setAttribute('cx', dotX);
+        tanhDot.setAttribute('cy', dotY);
+    }
+
+    // Step Time Forward
+    btnStep.addEventListener('click', () => {
+        // Read current output
+        const h_new = parseFloat(valHnew.innerText);
+        
+        // Trigger animation
+        boxHprev.classList.remove('anim-loop');
+        boxHnew.classList.remove('anim-loop');
+        
+        // Force reflow
+        void boxHprev.offsetWidth; 
+        
+        boxHprev.classList.add('anim-loop');
+        boxHnew.classList.add('anim-loop');
+        
+        // Set new memory state
+        h_prev = h_new;
+        
+        // Slightly randomize input to simulate a changing video frame
+        let newX = parseFloat(slideX.value) + (Math.random() * 1.0 - 0.5);
+        newX = Math.max(-3, Math.min(3, newX)); // clamp
+        slideX.value = newX.toFixed(2);
+        
+        updateMath();
+    });
+
+    // Attach slider events
+    [slideX, slideWxh, slideWhh, slideB, slideWhy, slideBy].forEach(slider => {
+        slider.addEventListener('input', updateMath);
+    });
+
+    // Initial render
+    updateMath();
+
+</script>
+</body>
+</html>
