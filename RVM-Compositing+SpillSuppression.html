@@ -361,13 +361,13 @@
 
         imgBg.onload = onImageLoad;
         imgBg.onerror = onImageError;
-        // Sci-Fi Abstract Background
-        imgBg.src = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&h=400&fit=crop";
+        // Tropical Beach Background
+        imgBg.src = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=600&h=400&fit=crop";
 
         imgPortrait.onload = onImageLoad;
         imgPortrait.onerror = onImageError;
-        // Portrait of a woman with curly hair (perfect for matting visualization)
-        imgPortrait.src = "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?q=80&w=600&h=400&fit=crop";
+        // Woman with curly hair on a green background
+        imgPortrait.src = "https://images.unsplash.com/photo-1542385151-efd9000785a0?q=80&w=600&h=400&fit=crop";
     }
 
     function processImageBuffers(imgBg, imgPortrait) {
@@ -381,47 +381,65 @@
         tempCtx.drawImage(imgPortrait, 0, 0, WIDTH, HEIGHT);
         const portraitData = tempCtx.getImageData(0, 0, WIDTH, HEIGHT).data;
 
-        // 2. Generate Alpha Matte (α)
-        // Creating an artificial soft vignette mask mapped to the portrait
-        const cx = WIDTH / 2;
-        const cy = HEIGHT / 2 + 30; // Move center slightly down
-        const gradAlpha = ctxAlpha.createRadialGradient(cx, cy, 50, cx, cy, 220);
-        gradAlpha.addColorStop(0, "rgba(255,255,255,1)");
-        gradAlpha.addColorStop(0.6, "rgba(255,255,255,0.8)"); // Simulates semi-transparent hair
-        gradAlpha.addColorStop(1, "rgba(0,0,0,1)"); // Pure background
+        // Initialize buffers
+        dataRaw = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        dataPure = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
         
         ctxAlpha.fillStyle = '#000';
         ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
-        ctxAlpha.fillStyle = gradAlpha;
-        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
         dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
 
-        // 3. Generate Raw Input (I) and Purified Fore (F)
-        dataRaw = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-        dataPure = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-
+        // 2. Process Pixels: Extract Alpha and Suppress Spill
+        // Simulating the RVM Neural Network output
         for (let i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
-            const alpha = dataAlpha[i] / 255.0;
-            const invAlpha = 1.0 - alpha;
+            const r = portraitData[i];
+            const g = portraitData[i+1];
+            const b = portraitData[i+2];
 
-            // Purified (F): We just use the raw portrait pixels. 
-            // In a real pipeline, the AI removes green spill, outputting pure color.
-            dataPure[i]   = portraitData[i];
-            dataPure[i+1] = portraitData[i+1];
-            dataPure[i+2] = portraitData[i+2];
-            dataPure[i+3] = 255;
+            // A basic Color Difference Keyer to extract alpha from the green background
+            // Max(R, B) represents the expected luma if it wasn't green
+            const maxRB = Math.max(r, b);
+            
+            // Calculate how "green" the pixel is
+            let greenDiff = g - maxRB;
+            
+            // Normalize into an alpha matte (0.0 to 1.0)
+            // Adjusting thresholds based on this specific image's lighting
+            let alpha = 1.0;
+            if (greenDiff > 10) {
+                // It's mostly green background
+                alpha = Math.max(0, 1.0 - (greenDiff / 40.0));
+            }
+            
+            // Save to Alpha Buffer
+            const alphaInt = Math.round(alpha * 255);
+            dataAlpha[i] = alphaInt;
+            dataAlpha[i+1] = alphaInt;
+            dataAlpha[i+2] = alphaInt;
+            dataAlpha[i+3] = 255;
 
-            // Naive Original (I): We must simulate what the raw camera footage looked like.
-            // We simulate that the subject was shot on a Green Screen.
-            // We blend the portrait with pure green based on the alpha mask.
-            // This bakes the "Green Spill" permanently into the pixels!
-            dataRaw[i]   = Math.round((alpha * portraitData[i]) + (invAlpha * 0));
-            dataRaw[i+1] = Math.round((alpha * portraitData[i+1]) + (invAlpha * 255)); // Pure Green background
-            dataRaw[i+2] = Math.round((alpha * portraitData[i+2]) + (invAlpha * 0));
+            // Raw Input (I): Exactly what the camera saw. Contains heavy green spill on hair.
+            dataRaw[i]   = r;
+            dataRaw[i+1] = g;
+            dataRaw[i+2] = b;
             dataRaw[i+3] = 255;
+
+            // Purified Foreground (F): The RVM network mathematically removes green spill.
+            // We simulate this by limiting the Green channel to never exceed the Red or Blue channel
+            // in areas where the alpha is semi-transparent (hair edges).
+            let pureG = g;
+            if (alpha < 0.95 && g > maxRB) {
+                pureG = maxRB; // Suppress the green bounce light
+            }
+
+            dataPure[i]   = r;
+            dataPure[i+1] = pureG;
+            dataPure[i+2] = b;
+            dataPure[i+3] = 255;
         }
 
         // Draw generated layers to the UI mini canvases
+        ctxAlpha.putImageData(new ImageData(dataAlpha, WIDTH, HEIGHT), 0, 0);
         ctxRaw.putImageData(new ImageData(dataRaw, WIDTH, HEIGHT), 0, 0);
         ctxPure.putImageData(new ImageData(dataPure, WIDTH, HEIGHT), 0, 0);
         
