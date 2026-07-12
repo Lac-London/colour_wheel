@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AVX2 Register Initialization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+            50% { box-shadow: 0 0 15px 2px rgba(56, 189, 248, 0.5); }
+        }
+
+        .register-cell {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .register-cell.active {
+            animation: pulseGlow 1.5s infinite;
+            border-color: #38bdf8;
+            background-color: rgba(56, 189, 248, 0.1);
+        }
+
+        .data-packet {
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            position: absolute;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-6">
+
+    <div class="max-w-6xl w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-bold text-sky-400">AVX2 Register Load Simulation</h2>
+                <p class="text-sm text-slate-400">Visualizing 256-bit Vector Initialization</p>
+            </div>
+            <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-emerald-400 border border-slate-700">
+                __m256i = 256 bits = 32 bytes
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row h-[600px]">
+            
+            <div class="lg:w-1/3 bg-slate-950 p-6 flex flex-col border-r border-slate-700 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-xs text-slate-500 code-font ml-2">simd_process.cpp</span>
+                </div>
+                
+                <div class="code-font text-sm space-y-2 text-slate-300">
+                    <div id="code-line-1" class="p-2 rounded border border-transparent transition-colors">
+                        <span class="text-slate-500">// 1. Define threshold vectors</span><br>
+                        <span class="text-purple-400">__m256i</span> thresh_cb = <span class="text-blue-400">_mm256_set1_epi8</span>(<span class="text-orange-400">110</span>);
+                    </div>
+                    
+                    <div class="p-2 text-slate-500">
+                        <span class="text-purple-400">__m256i</span> thresh_cr = <span class="text-blue-400">_mm256_set1_epi8</span>(<span class="text-orange-400">110</span>);<br>
+                        <span class="text-purple-400">__m256i</span> thresh_y  = <span class="text-blue-400">_mm256_set1_epi8</span>(<span class="text-orange-400">50</span>);
+                    </div>
+                    
+                    <div class="p-2 text-slate-500 mt-4">
+                        // ... processing loop ...
+                    </div>
+
+                    <div id="code-line-2" class="p-2 rounded border border-transparent transition-colors mt-2">
+                        <span class="text-slate-500">// 2. Load 32 pixels from memory</span><br>
+                        <span class="text-purple-400">__m256i</span> vec_cb = <span class="text-blue-400">_mm256_loadu_si256</span>(<br>
+                        &nbsp;&nbsp;(<span class="text-purple-400">__m256i*</span>)&Cb_data[i]<br>
+                        );
+                    </div>
+                </div>
+
+                <!-- Explanation Box -->
+                <div id="explanation-box" class="mt-auto bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300">
+                    Click "Start Simulation" to visualize the intrinsics.
+                </div>
+            </div>
+
+            <div class="lg:w-2/3 p-8 bg-slate-900 relative flex flex-col items-center justify-center">
+                
+                <!-- CPU Register (Destination) -->
+                <div class="w-full mb-12">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-sky-400 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                            CPU Register: <span class="code-font text-slate-200">thresh_cb / vec_cb</span>
+                        </h3>
+                        <span class="text-xs text-slate-500 font-semibold tracking-wider uppercase">256-bit Vector</span>
+                    </div>
+                    
+                    <!-- 32-Byte Grid -->
+                    <div class="grid grid-cols-16 gap-1 relative" id="cpu-register">
+                        <!-- Cells injected via JS -->
+                    </div>
+                    
+                    <div class="flex justify-between mt-2 text-[10px] text-slate-500 font-medium code-font">
+                        <span>Byte 0</span>
+                        <span>Byte 15</span>
+                        <span>Byte 16</span>
+                        <span>Byte 31</span>
+                    </div>
+                </div>
+
+                <div class="w-full opacity-50 transition-opacity duration-500" id="memory-area">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-emerald-400 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                            System Memory (RAM): <span class="code-font text-slate-200">Cb_data[i]</span>
+                        </h3>
+                    </div>
+                    
+                    <!-- Memory Grid -->
+                    <div class="grid grid-cols-16 gap-1" id="ram-memory">
+                        <!-- Cells injected via JS -->
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="absolute bottom-6 right-6 flex gap-4">
+                    <button id="btn-broadcast" class="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-colors shadow-lg shadow-slate-900 border border-slate-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                        1. Simulate _mm256_set1_epi8
+                    </button>
+                    <button id="btn-load" class="px-6 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-semibold transition-colors shadow-lg shadow-sky-900/50 border border-sky-500 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        2. Simulate _mm256_loadu_si256
+                    </button>
+                    <button id="btn-reset" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700" style="display: none;">
+                        Reset
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const cpuRegister = document.getElementById('cpu-register');
+        const ramMemory = document.getElementById('ram-memory');
+        const memoryArea = document.getElementById('memory-area');
+        
+        const btnBroadcast = document.getElementById('btn-broadcast');
+        const btnLoad = document.getElementById('btn-load');
+        const btnReset = document.getElementById('btn-reset');
+        const expBox = document.getElementById('explanation-box');
+        
+        const codeLine1 = document.getElementById('code-line-1');
+        const codeLine2 = document.getElementById('code-line-2');
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        // Generate grids
+        function createGrid(container, isMemory = false) {
+            container.innerHTML = '';
+            for (let i = 0; i < 32; i++) {
+                const cell = document.createElement('div');
+                cell.className = `register-cell h-10 rounded border flex items-center justify-center code-font text-xs font-bold
+                                  ${isMemory ? 'bg-slate-800 border-slate-700 text-emerald-400' : 'bg-slate-900 border-slate-700 text-slate-500'}`;
+                
+                // Add staggered animation delay
+                cell.style.animationDelay = `${i * 20}ms`;
+                
+                if (isMemory) {
+                    // Generate random Cb values for memory (mostly around 100-130 for realism)
+                    const val = Math.floor(Math.random() * 40) + 90;
+                    cell.textContent = val;
+                    cell.dataset.value = val;
+                } else {
+                    cell.textContent = '00';
+                }
+                
+                container.appendChild(cell);
+            }
+        }
+
+        // Initial setup
+        createGrid(cpuRegister);
+        createGrid(ramMemory, true);
+
+        // Simulation 1: Broadcast (_mm256_set1_epi8)
+        btnBroadcast.addEventListener('click', async () => {
+            btnBroadcast.disabled = true;
+            
+            // Highlight Code
+            codeLine1.classList.add('bg-slate-800', 'border-slate-600');
+            expBox.innerHTML = "<strong class='text-sky-400'>_mm256_set1_epi8</strong> (Set 1 Extended Packed Integer 8-bit): Takes a single scalar value (110) and literally copies it into all 32 byte-slots of the register simultaneously. This is highly efficient for creating the threshold comparison vectors.";
+            
+            const cells = cpuRegister.children;
+            
+            // Animate
+            for(let i=0; i<32; i++) {
+                cells[i].classList.add('active', 'text-sky-300');
+                cells[i].textContent = '110';
+                await sleep(30); // Staggered visual effect
+            }
+
+            await sleep(500);
+            
+            for(let i=0; i<32; i++) {
+                cells[i].classList.remove('active');
+            }
+
+            codeLine1.classList.remove('bg-slate-800', 'border-slate-600');
+            btnLoad.disabled = false;
+        });
+
+        // Simulation 2: Load (_mm256_loadu_si256)
+        btnLoad.addEventListener('click', async () => {
+            btnLoad.disabled = true;
+            
+            // Reset CPU register first
+            createGrid(cpuRegister);
+            
+            // Highlight Code & Show Memory
+            codeLine2.classList.add('bg-slate-800', 'border-slate-600');
+            memoryArea.classList.remove('opacity-50');
+            
+            expBox.innerHTML = "<strong class='text-emerald-400'>_mm256_loadu_si256</strong> (Load Unaligned SIMD 256-bit): Looks at the memory address of the first pixel (`&Cb_data[i]`), and sucks up exactly 256 bits (32 bytes) in one single, massive operation, placing them into the CPU register.";
+
+            await sleep(1000);
+
+            const cpuCells = cpuRegister.children;
+            const ramCells = ramMemory.children;
+
+            // Visual "sucking" animation from memory to register
+            const packets = [];
+            for(let i=0; i<32; i++) {
+                const ramCell = ramCells[i];
+                const cpuCell = cpuCells[i];
+                
+                // Highlight RAM
+                ramCell.classList.add('bg-emerald-900', 'border-emerald-500', 'text-white');
+                
+                // Get positions
+                const rectRam = ramCell.getBoundingClientRect();
+                const rectCpu = cpuCell.getBoundingClientRect();
+
+                // Create moving packet
+                const packet = document.createElement('div');
+                packet.className = 'data-packet h-10 rounded bg-emerald-500/80 flex items-center justify-center code-font text-xs font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.5)]';
+                packet.style.width = `${rectRam.width}px`;
+                packet.style.left = `${rectRam.left}px`;
+                packet.style.top = `${rectRam.top}px`;
+                packet.textContent = ramCell.dataset.value;
+                
+                document.body.appendChild(packet);
+                packets.push({el: packet, targetTop: rectCpu.top, targetLeft: rectCpu.left, value: ramCell.dataset.value});
+            }
+
+            await sleep(200); // Pause before move
+
+            // Move packets
+            packets.forEach((p, index) => {
+                setTimeout(() => {
+                    p.el.style.top = `${p.targetTop}px`;
+                    p.el.style.left = `${p.targetLeft}px`;
+                    p.el.style.backgroundColor = 'rgba(56, 189, 248, 0.9)'; // Change to blue as it hits CPU
+                    p.el.style.boxShadow = '0 0 15px rgba(56, 189, 248, 0.5)';
+                }, index * 15); // Stagger movement
+            });
+
+            // Wait for movement to finish
+            await sleep(800);
+
+            // Set final CPU values and cleanup
+            for(let i=0; i<32; i++) {
+                cpuCells[i].textContent = packets[i].value;
+                cpuCells[i].classList.add('bg-sky-900', 'border-sky-500', 'text-sky-300');
+                
+                // Cleanup packets and RAM highlight
+                packets[i].el.remove();
+                ramCells[i].classList.remove('bg-emerald-900', 'border-emerald-500', 'text-white');
+            }
+
+            expBox.innerHTML += "<br><br>The data is now ready in the CPU registers. The next step will perform 32 simultaneous greater-than (`>`) math checks in a single clock cycle.";
+            
+            codeLine2.classList.remove('bg-slate-800', 'border-slate-600');
+            memoryArea.classList.add('opacity-50');
+            btnReset.style.display = 'block';
+        });
+
+        // Reset
+        btnReset.addEventListener('click', () => {
+            createGrid(cpuRegister);
+            createGrid(ramMemory, true);
+            btnBroadcast.disabled = false;
+            btnLoad.disabled = true;
+            btnReset.style.display = 'none';
+            expBox.innerHTML = "Click 'Start Simulation' to visualize the intrinsics.";
+        });
+    </script>
+</body>
+</html>
