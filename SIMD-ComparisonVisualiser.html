@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMD Comparison Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    gridTemplateColumns: {
+                        '16': 'repeat(16, minmax(0, 1fr))'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-10px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        @keyframes flashCompare {
+            0% { background-color: rgba(56, 189, 248, 0); border-color: #334155; }
+            50% { background-color: rgba(56, 189, 248, 0.3); border-color: #38bdf8; box-shadow: 0 0 10px rgba(56,189,248,0.5); }
+            100% { background-color: rgba(56, 189, 248, 0); border-color: #334155; }
+        }
+
+        .register-cell {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .comparing {
+            animation: flashCompare 0.5s ease-out forwards;
+        }
+
+        .mask-true {
+            background-color: rgba(34, 197, 94, 0.2); /* Green */
+            border-color: #22c55e;
+            color: #4ade80;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.3);
+        }
+
+        .mask-false {
+            background-color: rgba(239, 68, 68, 0.1); /* Red dimmed */
+            border-color: #7f1d1d;
+            color: #f87171;
+            opacity: 0.6;
+        }
+
+        /* Custom scrollbar for code block */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
+
+    <div class="max-w-[1400px] w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+            <div>
+                <h2 class="text-xl font-bold text-sky-400">AVX2 Comparison Visualizer</h2>
+                <p class="text-sm text-slate-400">Visualizing <code>_mm256_cmpgt_epi8</code> and Mask Generation</p>
+            </div>
+            <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-emerald-400 border border-slate-700 hidden sm:block">
+                32 Simultaneous Operations / 1 Clock Cycle
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row h-auto lg:min-h-[750px]">
+            
+            <!-- Code Panel -->
+            <div class="lg:w-4/12 bg-slate-950 p-6 flex flex-col border-r border-slate-700 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-xs text-slate-500 code-font ml-2">simd_compare.cpp</span>
+                </div>
+                
+                <div class="w-full flex-grow overflow-x-auto mb-6">
+                    <pre class="code-font text-sm leading-relaxed text-slate-300 space-y-2">
+<span class="text-slate-500">// We need Cb < 110.</span>
+<span class="text-slate-500">// AVX2 Trick: Flip it to 110 > Cb</span>
+
+<div id="code-block" class="p-3 rounded-lg border border-transparent transition-all duration-300"><span class="text-slate-500">// Check: thresh_cb (110) > vec_cb</span>
+<span class="text-purple-400">__m256i</span> mask_cb = <span class="text-blue-400">_mm256_cmpgt_epi8</span>(
+    thresh_cb, 
+    vec_cb
+);</div>
+
+<span class="text-slate-500">// If Condition is TRUE:</span>
+<span class="text-slate-500">// Resulting byte = 0xFF (all 1s)</span>
+
+<span class="text-slate-500">// If Condition is FALSE:</span>
+<span class="text-slate-500">// Resulting byte = 0x00 (all 0s)</span>
+</pre>
+                </div>
+
+                <!-- Explanation Box -->
+                <div id="explanation-box" class="mt-auto bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300 shadow-inner">
+                    Click <strong>"Execute Comparison"</strong> to watch the CPU evaluate all 32 bytes simultaneously.
+                </div>
+            </div>
+
+            <!-- Hardware Visualizer Panel -->
+            <div class="lg:w-8/12 p-4 sm:p-8 bg-slate-900 flex flex-col items-center justify-start overflow-y-auto">
+                
+                <!-- Register 1: Threshold -->
+                <div class="w-full mb-6">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-sky-400 flex items-center gap-2">
+                            <span class="code-font">thresh_cb</span> (Operand A)
+                        </h3>
+                        <span class="text-xs text-slate-500 code-font">110</span>
+                    </div>
+                    <div class="grid grid-cols-16 gap-1" id="reg-thresh">
+                        <!-- Cells injected via JS -->
+                    </div>
+                </div>
+
+                <!-- Operator Row -->
+                <div class="w-full flex justify-center mb-6">
+                    <div class="text-2xl font-bold text-slate-500 code-font bg-slate-800 w-12 h-12 flex items-center justify-center rounded-full border border-slate-700 shadow-lg">
+                        &gt;
+                    </div>
+                </div>
+
+                <!-- Register 2: Data Vector -->
+                <div class="w-full mb-8">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-purple-400 flex items-center gap-2">
+                            <span class="code-font">vec_cb</span> (Operand B)
+                        </h3>
+                        <span class="text-xs text-slate-500 code-font">Pixel Data</span>
+                    </div>
+                    <div class="grid grid-cols-16 gap-1" id="reg-data">
+                        <!-- Cells injected via JS -->
+                    </div>
+                </div>
+
+                <!-- Equal Sign -->
+                <div class="w-full flex justify-center mb-8">
+                    <div class="text-2xl font-bold text-slate-500 code-font">
+                        ||<br>\/
+                    </div>
+                </div>
+
+                <!-- Register 3: Result Mask -->
+                <div class="w-full mb-8">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-emerald-400 flex items-center gap-2">
+                            <span class="code-font">mask_cb</span> (Result)
+                        </h3>
+                        <span class="text-xs text-slate-500 code-font">0xFF or 0x00</span>
+                    </div>
+                    <div class="grid grid-cols-16 gap-1" id="reg-mask">
+                        <!-- Cells injected via JS -->
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="w-full flex flex-wrap justify-center gap-4 mt-auto">
+                    <button id="btn-execute" class="px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold transition-all shadow-[0_0_15px_rgba(2,132,199,0.5)] border border-sky-400 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Execute _mm256_cmpgt_epi8
+                    </button>
+                    <button id="btn-reset" class="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-semibold transition-colors border border-slate-500">
+                        Randomize New Data
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const regThresh = document.getElementById('reg-thresh');
+        const regData = document.getElementById('reg-data');
+        const regMask = document.getElementById('reg-mask');
+        
+        const btnExecute = document.getElementById('btn-execute');
+        const btnReset = document.getElementById('btn-reset');
+        const codeBlock = document.getElementById('code-block');
+        const expBox = document.getElementById('explanation-box');
+
+        const NUM_BYTES = 32;
+        const THRESHOLD = 110;
+        
+        // Data Arrays
+        let dataValues = [];
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        // Initialize Grids
+        function initGrids() {
+            regThresh.innerHTML = '';
+            regData.innerHTML = '';
+            regMask.innerHTML = '';
+            dataValues = [];
+
+            for (let i = 0; i < NUM_BYTES; i++) {
+                // Threshold Cell (Fixed 110)
+                const tCell = document.createElement('div');
+                tCell.className = 'register-cell h-8 sm:h-10 rounded border border-slate-700 bg-slate-800 flex items-center justify-center code-font text-[10px] sm:text-xs font-bold text-sky-300';
+                tCell.textContent = THRESHOLD;
+                regThresh.appendChild(tCell);
+
+                // Data Cell (Random 90 to 130)
+                // We want a mix of values above and below 110
+                const randomVal = Math.floor(Math.random() * 40) + 90;
+                dataValues.push(randomVal);
+                
+                const dCell = document.createElement('div');
+                dCell.className = 'register-cell h-8 sm:h-10 rounded border border-slate-700 bg-slate-800 flex items-center justify-center code-font text-[10px] sm:text-xs font-bold text-purple-300';
+                dCell.textContent = randomVal;
+                regData.appendChild(dCell);
+
+                // Mask Cell (Empty initially)
+                const mCell = document.createElement('div');
+                mCell.className = 'register-cell h-8 sm:h-10 rounded border border-slate-700 bg-slate-900 flex items-center justify-center code-font text-[10px] sm:text-xs font-bold text-slate-600';
+                mCell.textContent = '??';
+                regMask.appendChild(mCell);
+            }
+        }
+
+        // Run the SIMD execution animation
+        async function executeSIMD() {
+            btnExecute.disabled = true;
+            btnReset.disabled = true;
+            
+            // Highlight Code
+            codeBlock.classList.add('bg-slate-800/80', 'border-sky-500/50', 'shadow-[0_0_15px_rgba(56,189,248,0.1)]');
+            expBox.innerHTML = "<strong>Evaluating:</strong> The CPU evaluates <code>110 > vec_cb[i]</code> for all 32 bytes in parallel...";
+
+            const tCells = regThresh.children;
+            const dCells = regData.children;
+            const mCells = regMask.children;
+
+            // Step 1: Flash the operands to simulate evaluation
+            for (let i = 0; i < NUM_BYTES; i++) {
+                // Staggered flash for visual effect (though hardware does it perfectly simultaneously)
+                setTimeout(() => {
+                    tCells[i].classList.add('comparing');
+                    dCells[i].classList.add('comparing');
+                }, i * 20); 
+            }
+
+            await sleep(600); // Wait for flashes to peak
+
+            // Step 2: Reveal the Mask
+            let trueCount = 0;
+            let falseCount = 0;
+
+            for (let i = 0; i < NUM_BYTES; i++) {
+                setTimeout(() => {
+                    const isTrue = THRESHOLD > dataValues[i];
+                    
+                    // Cleanup flashes
+                    tCells[i].classList.remove('comparing');
+                    dCells[i].classList.remove('comparing');
+
+                    // Apply Mask Value
+                    if (isTrue) {
+                        mCells[i].textContent = 'FF';
+                        mCells[i].className = 'register-cell h-8 sm:h-10 rounded border flex items-center justify-center code-font text-[10px] sm:text-xs font-bold mask-true';
+                        trueCount++;
+                    } else {
+                        mCells[i].textContent = '00';
+                        mCells[i].className = 'register-cell h-8 sm:h-10 rounded border flex items-center justify-center code-font text-[10px] sm:text-xs font-bold mask-false';
+                        falseCount++;
+                    }
+
+                    // On last byte, update explanation
+                    if (i === NUM_BYTES - 1) {
+                        finishExecution(trueCount, falseCount);
+                    }
+                }, i * 30); // Ripple reveal effect
+            }
+        }
+
+        function finishExecution(trueCount, falseCount) {
+            codeBlock.classList.remove('bg-slate-800/80', 'border-sky-500/50', 'shadow-[0_0_15px_rgba(56,189,248,0.1)]');
+            
+            expBox.innerHTML = `<strong>Result Generated!</strong><br><br>
+                <span class="text-emerald-400">■ ${trueCount} pixels</span> passed the check (110 > Cb). Their bytes were set to <strong>0xFF</strong> (all 1s).<br>
+                <span class="text-red-400">■ ${falseCount} pixels</span> failed. Their bytes were set to <strong>0x00</strong> (all 0s).<br><br>
+                This entire 32-byte mask is now ready for Step 3 (Combining Masks).`;
+            
+            btnReset.disabled = false;
+        }
+
+        // Bind Events
+        btnExecute.addEventListener('click', executeSIMD);
+        btnReset.addEventListener('click', () => {
+            initGrids();
+            btnExecute.disabled = false;
+            expBox.innerHTML = "Click <strong>\"Execute Comparison\"</strong> to watch the CPU evaluate all 32 bytes simultaneously.";
+        });
+
+        // Start
+        initGrids();
+
+    </script>
+</body>
+</html>
