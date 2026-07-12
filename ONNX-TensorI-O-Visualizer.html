@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONNX Tensor I/O Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        /* Animation Keyframes */
+        @keyframes pulse-engine {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); border-color: #10b981; }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px 10px rgba(16, 185, 129, 0.4); border-color: #34d399; }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); border-color: #10b981; }
+        }
+
+        .anim-processing {
+            animation: pulse-engine 0.8s ease-in-out;
+        }
+
+        /* Tensor Shapes */
+        .tensor-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+
+        .tensor-label { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+        .tensor-shape { font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+
+        /* Specific Tensor Colors */
+        .t-src { border-top: 4px solid #38bdf8; } /* Sky */
+        .t-mem { border-top: 4px solid #f59e0b; } /* Amber */
+        .t-out { border-top: 4px solid #ef4444; } /* Red */
+
+        /* Pyramid blocks for memory states */
+        .mem-block { background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; margin: 2px 0; }
+        
+        /* The Connection Paths */
+        svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .path-line {
+            fill: none;
+            stroke: #475569;
+            stroke-width: 2;
+            stroke-dasharray: 6 4;
+            opacity: 0.5;
+        }
+
+        .path-active {
+            stroke: #38bdf8;
+            opacity: 1;
+            animation: dash-flow 1s linear infinite;
+        }
+        
+        .path-mem {
+            stroke: #f59e0b;
+        }
+
+        @keyframes dash-flow {
+            to { stroke-dashoffset: -20; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="max-w-[1200px] w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col relative min-h-[700px]">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-5 border-b border-slate-700 flex justify-between items-center z-20">
+        <div>
+            <h2 class="text-xl font-bold text-sky-400 mb-1">ONNX Model I/O Cycle</h2>
+            <p class="text-sm text-slate-400">Tying the RGB `src` to the temporal `rxi` memory states.</p>
+        </div>
+        <div class="bg-slate-950 px-4 py-2 rounded-lg border border-slate-800">
+            <span class="text-sm text-slate-400 font-bold uppercase tracking-wider">Frame Time: </span>
+            <span id="frame-counter" class="text-2xl font-bold text-white code-font ml-2">t = 1</span>
+        </div>
+    </div>
+
+    <!-- Visualization Area -->
+    <div class="flex-grow relative overflow-hidden" id="viz-area">
+        
+        <!-- SVG for Lines -->
+        <svg id="lines-layer">
+            <!-- Drawn via JS -->
+        </svg>
+
+        <!-- Fixed Center Engine Node -->
+        <div id="onnx-engine" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[240px] h-[160px] bg-slate-900 border-2 border-emerald-500 rounded-xl flex flex-col items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.2)] z-20">
+            <h3 class="text-lg font-bold text-white mb-2">ONNX Runtime</h3>
+            <div class="code-font text-xs text-emerald-400 bg-emerald-950/50 px-3 py-1 rounded border border-emerald-900">Session.Run()</div>
+            <p class="text-[10px] text-slate-400 mt-4 text-center px-4">Executes the TensorRT optimized ConvGRU operations.</p>
+        </div>
+
+        <!-- Dynamic Tensors (Injected via JS) -->
+    </div>
+
+    <!-- Controls & Explanation -->
+    <div class="bg-slate-950 p-6 border-t border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-6 z-20">
+        <div id="explanation-box" class="text-sm text-slate-300 flex-1">
+            <strong>Initialization:</strong> The pipeline is ready. We have a fresh video frame (`src`) and the recurrent hidden states (`rxi`) from memory VRAM. Click "Process Frame $t$" to execute.
+        </div>
+        <button id="btn-process" class="px-8 py-4 bg-sky-600 hover:bg-sky-500 text-white rounded-full font-bold transition-all shadow-[0_0_20px_rgba(2,132,199,0.4)] border border-sky-400 flex items-center gap-2 whitespace-nowrap">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            Process Frame <span id="btn-t-text">1</span>
+        </button>
+    </div>
+</div>
+
+<script>
+    // State variables
+    let currentT = 1;
+    let isProcessing = false;
+
+    // DOM Elements
+    const vizArea = document.getElementById('viz-area');
+    const onnxEngine = document.getElementById('onnx-engine');
+    const btnProcess = document.getElementById('btn-process');
+    const btnTText = document.getElementById('btn-t-text');
+    const frameCounter = document.getElementById('frame-counter');
+    const expBox = document.getElementById('explanation-box');
+
+    // Tensor Nodes
+    let srcNode, rxiNode, fgrNode, phaNode, rxoNode;
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    function createTensorCard(id, label, shapes, colorClass, htmlContent = '') {
+        const card = document.createElement('div');
+        card.id = id;
+        card.className = `tensor-card ${colorClass}`;
+        
+        let innerHtml = `<div class="tensor-label ${colorClass.includes('src') ? 'text-sky-400' : colorClass.includes('mem') ? 'text-amber-400' : 'text-rose-400'}">${label}</div>`;
+        
+        if (htmlContent) {
+            innerHtml += htmlContent;
+        } else {
+            shapes.forEach(shape => {
+                innerHtml += `<div class="tensor-shape">${shape}</div>`;
+            });
+        }
+        
+        card.innerHTML = innerHtml;
+        vizArea.appendChild(card);
+        return card;
+    }
+
+    function initTensors() {
+        // Clear old ones if they exist
+        [srcNode, rxiNode, fgrNode, phaNode, rxoNode].forEach(node => {
+            if (node) node.remove();
+        });
+
+        // 1. SRC Image
+        srcNode = createTensorCard('t-src', 'src (RGB Image)', ['[1, 3, 1080, 1920]'], 't-src', `
+            <div class="text-[9px] text-slate-400 mt-1 mb-2">Normalized [0,1]</div>
+            <div class="w-16 h-10 border border-sky-600 rounded bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjMGYxNzJhIi8+PGNpcmNsZSBjeD0iMjAiIGN5PSIyMCIgcj0iMTAiIGZpbGw9IiMzOGJkZjgiIG9wYWNpdHk9IjAuNSIvPjwvc3ZnPg==')] bg-cover bg-center"></div>
+        `);
+
+        // 2. RXI Memory Pyramid
+        rxiNode = createTensorCard('t-rxi', `rxi (States t-${currentT-1})`, [], 't-mem', `
+            <div class="flex flex-col items-center mt-2 w-full gap-1">
+                <div class="mem-block h-[8px] w-24 text-[8px] flex items-center justify-center text-amber-200">r1i: 16x540x960</div>
+                <div class="mem-block h-[12px] w-20 text-[8px] flex items-center justify-center text-amber-200">r2i: 24x270x480</div>
+                <div class="mem-block h-[16px] w-16 text-[8px] flex items-center justify-center text-amber-200">r3i: 48x135x240</div>
+                <div class="mem-block h-[20px] w-12 text-[8px] flex items-center justify-center text-amber-200">r4i: 64x67x120</div>
+            </div>
+            <div class="text-[9px] text-slate-400 mt-2">VRAM Buffer</div>
+        `);
+
+        // Set Initial Positions (Left Side)
+        srcNode.style.top = '20%';
+        srcNode.style.left = '10%';
+        
+        rxiNode.style.top = '50%';
+        rxiNode.style.left = '10%';
+    }
+
+    async function processFrame() {
+        if (isProcessing) return;
+        isProcessing = true;
+        btnProcess.disabled = true;
+        
+        // --- STEP 1: INGESTION ---
+        expBox.innerHTML = `<strong>Step 1: Input Binding.</strong> Moving the RGB <code class="text-sky-400">src</code> image and the four <code class="text-amber-400">rxi</code> state tensors (representing the multi-scale memory from frame $t-${currentT-1}$) into the ONNX Runtime engine.`;
+        
+        // Move to engine
+        srcNode.style.top = '35%';
+        srcNode.style.left = '45%';
+        srcNode.style.transform = 'scale(0.8)';
+        srcNode.style.opacity = '0';
+
+        rxiNode.style.top = '65%';
+        rxiNode.style.left = '45%';
+        rxiNode.style.transform = 'scale(0.8)';
+        rxiNode.style.opacity = '0';
+
+        await sleep(600);
+
+        // --- STEP 2: PROCESSING ---
+        expBox.innerHTML = `<strong>Step 2: Session.Run().</strong> The TensorRT engine calculates the math. The ConvGRUs combine the fresh image features with the hidden memory states to figure out where the subject has moved.`;
+        onnxEngine.classList.add('anim-processing');
+        
+        await sleep(800);
+        onnxEngine.classList.remove('anim-processing');
+
+        // --- STEP 3: OUTPUT EXTRACTION ---
+        expBox.innerHTML = `<strong>Step 3: Output Generation.</strong> The network produces the purified Foreground (<code class="text-rose-400">fgr</code>) and Alpha Matte (<code class="text-rose-400">pha</code>). Crucially, it outputs four updated memory states (<code class="text-amber-400">rxo</code>).`;
+
+        // Create outputs sprouting from engine
+        fgrNode = createTensorCard('t-fgr', 'fgr & pha', ['[1, 3, 1080, 1920]', '[1, 1, 1080, 1920]'], 't-out');
+        fgrNode.style.top = '35%';
+        fgrNode.style.left = '45%';
+        fgrNode.style.transform = 'scale(0.8)';
+        fgrNode.style.opacity = '0';
+
+        rxoNode = createTensorCard('t-rxo', `rxo (States t-${currentT})`, [], 't-mem', `
+            <div class="flex flex-col items-center mt-2 w-full gap-1">
+                <div class="mem-block h-[8px] w-24 text-[8px] flex items-center justify-center text-amber-200">r1o: 16x540x960</div>
+                <div class="mem-block h-[12px] w-20 text-[8px] flex items-center justify-center text-amber-200">r2o: 24x270x480</div>
+                <div class="mem-block h-[16px] w-16 text-[8px] flex items-center justify-center text-amber-200">r3o: 48x135x240</div>
+                <div class="mem-block h-[20px] w-12 text-[8px] flex items-center justify-center text-amber-200">r4o: 64x67x120</div>
+            </div>
+        `);
+        rxoNode.style.top = '65%';
+        rxoNode.style.left = '45%';
+        rxoNode.style.transform = 'scale(0.8)';
+        rxoNode.style.opacity = '0';
+
+        // Force reflow
+        void fgrNode.offsetWidth;
+
+        // Move to right
+        fgrNode.style.top = '20%';
+        fgrNode.style.left = '75%';
+        fgrNode.style.transform = 'scale(1)';
+        fgrNode.style.opacity = '1';
+
+        rxoNode.style.top = '50%';
+        rxoNode.style.left = '75%';
+        rxoNode.style.transform = 'scale(1)';
+        rxoNode.style.opacity = '1';
+
+        await sleep(1000);
+
+        // --- STEP 4: THE MEMORY LOOP (CRITICAL) ---
+        expBox.innerHTML = `<strong>Step 4: The IOBinding Loop.</strong> <span class="text-amber-400 font-bold">This is the secret to Temporal Coherence.</span> We instruct CUDA to instantly overwrite the old <code>rxi</code> buffer with the new <code>rxo</code> tensors. The memory perfectly loops back in time for the next frame!`;
+        
+        // The outputs leave the screen
+        fgrNode.style.left = '120%';
+        
+        // The RXO arcs back to the start
+        rxoNode.style.top = '80%';
+        rxoNode.style.left = '45%';
+        
+        await sleep(300);
+        
+        rxoNode.style.top = '80%';
+        rxoNode.style.left = '10%';
+        
+        await sleep(300);
+
+        rxoNode.style.top = '50%';
+        rxoNode.style.left = '10%';
+
+        await sleep(400);
+
+        // Advance Time
+        currentT++;
+        frameCounter.innerText = `t = ${currentT}`;
+        btnTText.innerText = currentT;
+        
+        // Reset Board seamlessly
+        initTensors(); // Creates new SRC and sets RXI to currentT-1 position
+        
+        expBox.innerHTML = `<strong>Ready for Frame $t=${currentT}$.</strong> The ` + "`rxi`" + ` inputs are now holding the visual memory geometry from frame $t=${currentT-1}$. The loop continues.`;
+        
+        isProcessing = false;
+        btnProcess.disabled = false;
+    }
+
+    // Bind Button
+    btnProcess.addEventListener('click', processFrame);
+
+    // Initial Setup
+    initTensors();
+
+</script>
+</body>
+</html>
