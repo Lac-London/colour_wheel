@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vanishing Memory (RNN) Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        /* Custom range slider styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px; width: 20px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            margin-top: -8px;
+            box-shadow: 0 0 10px rgba(255,255,255,0.4);
+            transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #334155;
+            border-radius: 2px;
+        }
+        input[type=range]:focus { outline: none; }
+
+        /* Graph Bars */
+        .bar-container {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            height: 300px;
+            padding: 0 10px;
+            position: relative;
+            border-bottom: 2px solid #334155;
+            border-left: 2px solid #334155;
+        }
+        
+        .memory-bar {
+            width: 1.5%;
+            background: linear-gradient(to top, #0284c7, #38bdf8);
+            border-radius: 4px 4px 0 0;
+            transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s, opacity 0.3s;
+            position: relative;
+        }
+        
+        .memory-bar:hover::after {
+            content: attr(data-val);
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            pointer-events: none;
+            z-index: 10;
+            border: 1px solid #475569;
+        }
+
+        .memory-bar.dead {
+            background: #334155;
+            opacity: 0.5;
+        }
+
+        /* Y-Axis labels */
+        .y-axis {
+            position: absolute;
+            left: -40px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            color: #64748b;
+            font-size: 12px;
+            font-weight: 600;
+            padding-bottom: 2px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="max-w-5xl w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-5 border-b border-slate-700 flex flex-col sm:flex-row justify-between items-center shrink-0">
+        <div>
+            <h2 class="text-2xl font-bold text-rose-400 mb-1">The Vanishing Memory Problem</h2>
+            <p class="text-sm text-slate-400">Visualizing \( h_t = \tanh(W_{hh} \times h_{t-1}) \) over 50 frames.</p>
+        </div>
+        <div class="mt-4 sm:mt-0 code-font text-xs bg-slate-800 px-4 py-2 rounded text-slate-300 border border-slate-700 shadow-inner">
+            <span class="text-rose-400 font-bold">Goal:</span> Keep the memory alive > 5%
+        </div>
+    </div>
+
+    <div class="p-6 sm:p-10 bg-slate-900 relative">
+        <h3 class="text-center text-slate-300 font-bold mb-6 tracking-wider uppercase text-sm">Memory Strength over Time (Frames 0 to 50)</h3>
+        
+        <!-- Graph Area -->
+        <div class="ml-10 relative">
+            <!-- Y-Axis -->
+            <div class="y-axis">
+                <span>1.0</span>
+                <span>0.5</span>
+                <span>0.0</span>
+            </div>
+            
+            <!-- Horizontal Grid Lines -->
+            <div class="absolute w-full h-full pointer-events-none flex flex-col justify-between">
+                <div class="border-t border-slate-700/50 w-full"></div>
+                <div class="border-t border-slate-700/50 w-full"></div>
+                <div class="border-t border-slate-700/50 w-full" style="opacity: 0;"></div>
+            </div>
+
+            <!-- The Bar Chart Container -->
+            <div class="bar-container" id="chart-container">
+                <!-- Bars will be injected here via JavaScript -->
+            </div>
+            
+            <!-- X-Axis Labels -->
+            <div class="flex justify-between text-xs text-slate-500 font-bold mt-2">
+                <span>t=0<br>(Event)</span>
+                <span>t=10</span>
+                <span>t=20</span>
+                <span>t=30</span>
+                <span>t=40</span>
+                <span>t=50</span>
+            </div>
+        </div>
+        
+        <!-- Floating Stats Box -->
+        <div class="absolute top-6 right-6 sm:top-10 sm:right-10 bg-slate-800/90 backdrop-blur border border-slate-600 p-4 rounded-lg shadow-lg w-48 pointer-events-none">
+            <div class="text-xs text-slate-400 uppercase font-bold mb-1">Status</div>
+            <div id="status-text" class="text-2xl font-bold text-white code-font">Alive</div>
+            <div class="w-full h-px bg-slate-600 my-2"></div>
+            <div class="text-xs text-slate-400">Memory dead at frame:</div>
+            <div id="death-frame" class="text-lg font-bold text-rose-400 code-font">Frame 12</div>
+        </div>
+    </div>
+
+    <div class="bg-slate-950 p-6 border-t border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-8">
+        
+        <!-- Left: Sliders -->
+        <div class="space-y-6">
+            <div class="bg-slate-900 p-5 rounded-lg border border-slate-800">
+                <div class="flex justify-between items-end mb-4">
+                    <div>
+                        <div class="text-sm font-bold text-sky-400">Recurrent Weight (W_hh)</div>
+                        <div class="text-xs text-slate-500">The multiplier applied every frame.</div>
+                    </div>
+                    <span id="label-weight" class="text-xl code-font font-bold text-white">0.90</span>
+                </div>
+                <input type="range" id="slider-weight" min="0.1" max="1.5" step="0.01" value="0.9">
+            </div>
+
+            <div class="bg-slate-900 p-5 rounded-lg border border-slate-800 opacity-70">
+                <div class="flex justify-between items-end mb-4">
+                    <div>
+                        <div class="text-sm font-bold text-emerald-400">Initial Event Strength (h_0)</div>
+                        <div class="text-xs text-slate-500">How strong the memory starts at t=0.</div>
+                    </div>
+                    <span id="label-init" class="text-xl code-font font-bold text-white">1.00</span>
+                </div>
+                <input type="range" id="slider-init" min="0.1" max="1.0" step="0.05" value="1.0">
+            </div>
+        </div>
+
+        <!-- Right: Explanation -->
+        <div class="bg-slate-800 p-6 rounded-lg border border-slate-600 shadow-inner flex flex-col justify-center">
+            <h4 class="text-rose-400 font-bold mb-2 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Mathematical Diagnosis
+            </h4>
+            <p id="explanation-text" class="text-sm text-slate-300 leading-relaxed">
+                Loading math parameters...
+            </p>
+            <div class="mt-4 p-3 bg-slate-900 rounded border border-slate-700 text-xs text-slate-400 code-font">
+                Formula: h(t) = tanh( W_hh * h(t-1) )
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    const NUM_FRAMES = 50;
+    const THRESHOLD = 0.05; // 5% memory strength is considered "dead"
+
+    // DOM Elements
+    const chartContainer = document.getElementById('chart-container');
+    const sliderWeight = document.getElementById('slider-weight');
+    const sliderInit = document.getElementById('slider-init');
+    const labelWeight = document.getElementById('label-weight');
+    const labelInit = document.getElementById('label-init');
+    const statusText = document.getElementById('status-text');
+    const deathFrameText = document.getElementById('death-frame');
+    const explanationText = document.getElementById('explanation-text');
+
+    // Create Bars
+    const bars = [];
+    for (let i = 0; i <= NUM_FRAMES; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'memory-bar';
+        chartContainer.appendChild(bar);
+        bars.push(bar);
+    }
+
+    function updateSimulation() {
+        const w_hh = parseFloat(sliderWeight.value);
+        const h_init = parseFloat(sliderInit.value);
+
+        // Update Labels
+        labelWeight.innerText = w_hh.toFixed(2);
+        labelInit.innerText = h_init.toFixed(2);
+
+        let current_h = h_init;
+        let deadFrame = -1;
+
+        // Execute Recurrent Loop
+        for (let t = 0; t <= NUM_FRAMES; t++) {
+            // Apply value to bar
+            const heightPercent = Math.max(0, current_h * 100);
+            bars[t].style.height = `${heightPercent}%`;
+            bars[t].setAttribute('data-val', current_h.toFixed(3));
+
+            // Check if memory died this frame
+            if (current_h < THRESHOLD && deadFrame === -1) {
+                deadFrame = t;
+            }
+
+            // Style dead bars
+            if (current_h < THRESHOLD) {
+                bars[t].classList.add('dead');
+            } else {
+                bars[t].classList.remove('dead');
+            }
+
+            // Calculate NEXT frame's memory using the RNN formula
+            // h_t = tanh( W_hh * h_{t-1} )
+            current_h = Math.tanh(w_hh * current_h);
+        }
+
+        // Update Status UI
+        if (deadFrame === -1) {
+            statusText.innerText = "Survives!";
+            statusText.className = "text-2xl font-bold text-emerald-400 code-font";
+            deathFrameText.innerText = `Outlasts ${NUM_FRAMES} frames`;
+            deathFrameText.className = "text-lg font-bold text-emerald-400 code-font";
+        } else {
+            statusText.innerText = "Memory Lost";
+            statusText.className = "text-2xl font-bold text-rose-400 code-font";
+            deathFrameText.innerText = `Frame ${deadFrame}`;
+            deathFrameText.className = "text-lg font-bold text-rose-400 code-font";
+        }
+
+        // Update Educational Text
+        if (w_hh < 1.0) {
+            explanationText.innerHTML = `Because the weight is <strong>less than 1.0</strong> (${w_hh}), the signal shrinks exponentially. Every single frame, it is multiplied by a fraction, quickly driving the memory down to zero. The network completely forgets the event.`;
+        } else if (w_hh === 1.0) {
+            explanationText.innerHTML = `<strong>The Tanh Trap!</strong> Even though the weight is exactly 1.0, the memory STILL vanishes! Because the mathematical curve of <code>tanh(x)</code> is always slightly less than <code>x</code>, passing a number through it repeatedly slowly bleeds the value to zero.`;
+        } else {
+            explanationText.innerHTML = `Because the weight is <strong>greater than 1.0</strong> (${w_hh}), the signal survives longer. However, <code>tanh()</code> forcibly flattens (saturates) the output so it can never exceed 1.0. While the "forward" memory survives, this saturation kills the gradients during backpropagation training!`;
+        }
+    }
+
+    // Attach listeners
+    sliderWeight.addEventListener('input', updateSimulation);
+    sliderInit.addEventListener('input', updateSimulation);
+
+    // Initial run
+    updateSimulation();
+</script>
+</body>
+</html>
