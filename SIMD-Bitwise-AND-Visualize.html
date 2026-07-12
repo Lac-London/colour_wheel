@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMD Bitwise AND Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    gridTemplateColumns: {
+                        '16': 'repeat(16, minmax(0, 1fr))'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        @keyframes flashCombine {
+            0% { transform: scale(1); filter: brightness(1); }
+            50% { transform: scale(1.1); filter: brightness(1.5); box-shadow: 0 0 15px rgba(56, 189, 248, 0.8); z-index: 10; }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+
+        .register-cell {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .combining {
+            animation: flashCombine 0.5s ease-out forwards;
+            border-color: #38bdf8 !important;
+        }
+
+        .val-ff {
+            background-color: rgba(34, 197, 94, 0.2);
+            border-color: #22c55e;
+            color: #4ade80;
+            box-shadow: inset 0 0 8px rgba(34, 197, 94, 0.2);
+        }
+
+        .val-00 {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: #7f1d1d;
+            color: #f87171;
+            opacity: 0.6;
+        }
+
+        .val-empty {
+            background-color: #0f172a;
+            border-color: #334155;
+            color: #475569;
+        }
+
+        .val-final-match {
+            background-color: rgba(16, 185, 129, 0.4);
+            border-color: #10b981;
+            color: #a7f3d0;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+            font-weight: 800;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
+
+    <div class="max-w-[1400px] w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+            <div>
+                <h2 class="text-xl font-bold text-sky-400">SIMD Mask Combination</h2>
+                <p class="text-sm text-slate-400">Visualizing <code>_mm256_and_si256</code> (Bitwise AND)</p>
+            </div>
+            <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-emerald-400 border border-slate-700 hidden sm:block">
+                Logical Intersection / 256 bits per cycle
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row h-auto lg:h-[750px]">
+            
+            <!-- Code Panel -->
+            <div class="lg:w-4/12 bg-slate-950 p-6 flex flex-col border-r border-slate-700 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-xs text-slate-500 code-font ml-2">simd_combine.cpp</span>
+                </div>
+                
+                <div class="w-full flex-grow overflow-x-auto mb-6">
+                    <pre class="code-font text-[13px] leading-relaxed text-slate-300 space-y-4">
+<span class="text-slate-500">// We have 3 masks representing our conditions.
+// A byte is 0xFF if True, 0x00 if False.</span>
+
+<div id="code-line-1" class="p-3 rounded-lg border border-transparent transition-all duration-300"><span class="text-slate-500">// 1. Intersect Cb and Cr Masks</span>
+<span class="text-purple-400">__m256i</span> final_mask = <span class="text-blue-400">_mm256_and_si256</span>(
+    mask_cb, 
+    mask_cr
+);</div>
+
+<div id="code-line-2" class="p-3 rounded-lg border border-transparent transition-all duration-300"><span class="text-slate-500">// 2. Intersect the result with Y Mask</span>
+final_mask = <span class="text-blue-400">_mm256_and_si256</span>(
+    final_mask, 
+    mask_y
+);</div>
+
+<span class="text-slate-500">// If final_mask byte == 0xFF:
+// -> Pixel passed ALL tests (Pure Green Screen)</span>
+</pre>
+                </div>
+
+                <!-- Explanation Box -->
+                <div id="explanation-box" class="mt-auto bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300 shadow-inner">
+                    Click <strong>"Run Step 1"</strong> to execute the first 256-bit bitwise AND operation.
+                </div>
+            </div>
+
+            <div class="lg:w-8/12 p-4 sm:p-6 bg-slate-900 flex flex-col justify-start overflow-y-auto relative">
+                
+                <!-- Mask CB -->
+                <div class="w-full mb-3">
+                    <div class="flex justify-between items-end mb-1">
+                        <h3 class="font-bold text-blue-400 text-sm flex items-center gap-2">
+                            <span class="code-font">mask_cb</span> (Cb < 110)
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-16 gap-[2px]" id="reg-cb"></div>
+                </div>
+
+                <!-- Mask CR -->
+                <div class="w-full mb-4 relative">
+                    <div class="flex justify-between items-end mb-1">
+                        <h3 class="font-bold text-pink-400 text-sm flex items-center gap-2">
+                            <span class="code-font">mask_cr</span> (Cr < 110)
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-16 gap-[2px]" id="reg-cr"></div>
+                    
+                    <!-- Logic Label -->
+                    <div class="absolute -bottom-5 left-1/2 transform -translate-x-1/2 z-10 code-font text-sky-400 font-bold bg-slate-900 px-2 text-xs">AND &amp;</div>
+                </div>
+
+                <!-- Final Mask (Intermediate/Final) -->
+                <div class="w-full mb-4 pt-3 pb-3 px-2 bg-slate-800/50 rounded-lg border border-sky-900/50" id="final-container">
+                    <div class="flex justify-between items-end mb-1">
+                        <h3 class="font-bold text-sky-400 text-sm flex items-center gap-2" id="final-label">
+                            <span class="code-font">final_mask</span> (Result)
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-16 gap-[2px]" id="reg-final"></div>
+                </div>
+
+                <!-- Mask Y -->
+                <div class="w-full mb-6 relative">
+                    <div class="absolute -top-5 left-1/2 transform -translate-x-1/2 z-10 code-font text-emerald-400 font-bold bg-slate-900 px-2 text-xs opacity-50" id="and-y-label">AND &amp;</div>
+                    
+                    <div class="flex justify-between items-end mb-1 pt-2">
+                        <h3 class="font-bold text-yellow-500 text-sm flex items-center gap-2 opacity-50" id="y-title">
+                            <span class="code-font">mask_y</span> (Y > 50)
+                        </h3>
+                    </div>
+                    <div class="grid grid-cols-16 gap-[2px] opacity-50 transition-opacity duration-500" id="reg-y"></div>
+                </div>
+
+                <div class="w-full flex flex-wrap justify-center gap-4 mt-auto pt-4 border-t border-slate-700">
+                    <button id="btn-step1" class="px-6 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold transition-all shadow-lg shadow-sky-900/50 border border-sky-400 disabled:opacity-50 disabled:cursor-not-allowed">
+                        1. Run _mm256_and (Cb & Cr)
+                    </button>
+                    <button id="btn-step2" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all shadow-lg shadow-emerald-900/50 border border-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        2. Run _mm256_and (Final & Y)
+                    </button>
+                    <button id="btn-reset" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition-colors border border-slate-600" style="display: none;">
+                        Reset Arrays
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const NUM_BYTES = 32;
+
+        // Elements
+        const regCb = document.getElementById('reg-cb');
+        const regCr = document.getElementById('reg-cr');
+        const regY = document.getElementById('reg-y');
+        const regFinal = document.getElementById('reg-final');
+        
+        const yTitle = document.getElementById('y-title');
+        const andYLabel = document.getElementById('and-y-label');
+        const finalContainer = document.getElementById('final-container');
+        
+        const codeLine1 = document.getElementById('code-line-1');
+        const codeLine2 = document.getElementById('code-line-2');
+        const expBox = document.getElementById('explanation-box');
+
+        const btnStep1 = document.getElementById('btn-step1');
+        const btnStep2 = document.getElementById('btn-step2');
+        const btnReset = document.getElementById('btn-reset');
+
+        // State Data
+        let dataCb = [];
+        let dataCr = [];
+        let dataY = [];
+        let dataFinal = [];
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        function generateRandomMask() {
+            // 40% chance of being 0xFF to ensure we get some overlaps
+            return Math.random() > 0.6 ? 'FF' : '00';
+        }
+
+        function createCell(value, isResult = false) {
+            const cell = document.createElement('div');
+            const colorClass = value === 'FF' ? 'val-ff' : (value === '00' ? 'val-00' : 'val-empty');
+            cell.className = `register-cell h-7 sm:h-9 rounded border flex items-center justify-center code-font text-[10px] sm:text-[11px] font-bold ${colorClass}`;
+            cell.textContent = value;
+            return cell;
+        }
+
+        // Initialize Data and UI
+        function initData() {
+            regCb.innerHTML = ''; regCr.innerHTML = ''; regY.innerHTML = ''; regFinal.innerHTML = '';
+            dataCb = []; dataCr = []; dataY = []; dataFinal = [];
+
+            // Force at least 2-3 columns to be all FF so the demo works visually
+            const forcedIndexes = [3, 14, 25];
+
+            for (let i = 0; i < NUM_BYTES; i++) {
+                let cb = generateRandomMask();
+                let cr = generateRandomMask();
+                let y = generateRandomMask();
+
+                if (forcedIndexes.includes(i)) {
+                    cb = 'FF'; cr = 'FF'; y = 'FF';
+                }
+
+                dataCb.push(cb);
+                dataCr.push(cr);
+                dataY.push(y);
+                dataFinal.push('??');
+
+                regCb.appendChild(createCell(cb));
+                regCr.appendChild(createCell(cr));
+                regY.appendChild(createCell(y));
+                regFinal.appendChild(createCell('??'));
+            }
+
+            // Reset UI states
+            regY.classList.add('opacity-50');
+            yTitle.classList.add('opacity-50');
+            andYLabel.classList.add('opacity-50');
+            
+            finalContainer.classList.remove('border-emerald-500/80', 'bg-emerald-900/20');
+            finalContainer.classList.add('border-sky-900/50', 'bg-slate-800/50');
+            document.getElementById('final-label').classList.remove('text-emerald-400');
+            document.getElementById('final-label').classList.add('text-sky-400');
+
+            btnStep1.disabled = false;
+            btnStep2.disabled = true;
+            btnReset.style.display = 'none';
+            codeLine1.classList.remove('bg-slate-800/80', 'border-sky-500/50');
+            codeLine2.classList.remove('bg-slate-800/80', 'border-emerald-500/50');
+            
+            expBox.innerHTML = "Click <strong>\"Run Step 1\"</strong> to execute the first 256-bit bitwise AND operation.";
+        }
+
+        async function runStep1() {
+            btnStep1.disabled = true;
+            
+            codeLine1.classList.add('bg-slate-800/80', 'border-sky-500/50', 'shadow-[0_0_15px_rgba(56,189,248,0.1)]');
+            expBox.innerHTML = "<strong class='text-sky-400'>Step 1 Executing:</strong> The hardware processes all 256 bits simultaneously. <code>FF & FF = FF</code>. Anything else results in <code>00</code>.";
+
+            const cbCells = regCb.children;
+            const crCells = regCr.children;
+            const finalCells = regFinal.children;
+
+            // Flash inputs
+            for (let i = 0; i < NUM_BYTES; i++) {
+                setTimeout(() => {
+                    cbCells[i].classList.add('combining');
+                    crCells[i].classList.add('combining');
+                }, i * 15);
+            }
+
+            await sleep(600);
+
+            // Calculate and display intermediate final_mask
+            for (let i = 0; i < NUM_BYTES; i++) {
+                setTimeout(() => {
+                    const isTrue = dataCb[i] === 'FF' && dataCr[i] === 'FF';
+                    dataFinal[i] = isTrue ? 'FF' : '00';
+                    
+                    cbCells[i].classList.remove('combining');
+                    crCells[i].classList.remove('combining');
+
+                    const newCell = createCell(dataFinal[i]);
+                    if (isTrue) {
+                        newCell.classList.add('shadow-[0_0_8px_rgba(56,189,248,0.5)]', 'border-sky-400', 'text-sky-300');
+                    }
+                    finalCells[i].replaceWith(newCell);
+
+                }, i * 15);
+            }
+
+            await sleep(600);
+            
+            // Prepare for Step 2
+            codeLine1.classList.remove('bg-slate-800/80', 'border-sky-500/50', 'shadow-[0_0_15px_rgba(56,189,248,0.1)]');
+            regY.classList.remove('opacity-50');
+            yTitle.classList.remove('opacity-50');
+            andYLabel.classList.remove('opacity-50');
+            andYLabel.classList.remove('text-sky-400');
+            andYLabel.classList.add('text-emerald-400');
+            
+            btnStep2.disabled = false;
+            expBox.innerHTML += "<br><br>Intermediate mask created. Click <strong>\"Run Step 2\"</strong> to apply the final Luminance (Y) filter.";
+        }
+
+        async function runStep2() {
+            btnStep2.disabled = true;
+            
+            codeLine2.classList.add('bg-slate-800/80', 'border-emerald-500/50', 'shadow-[0_0_15px_rgba(16,185,129,0.1)]');
+            finalContainer.classList.remove('border-sky-900/50', 'bg-slate-800/50');
+            finalContainer.classList.add('border-emerald-500/80', 'bg-emerald-900/20');
+            document.getElementById('final-label').classList.remove('text-sky-400');
+            document.getElementById('final-label').classList.add('text-emerald-400');
+
+            expBox.innerHTML = "<strong class='text-emerald-400'>Step 2 Executing:</strong> Applying the final bitwise AND against the Luminance mask (Y > 50).";
+
+            const finalCells = regFinal.children;
+            const yCells = regY.children;
+            let successCount = 0;
+
+            for (let i = 0; i < NUM_BYTES; i++) {
+                setTimeout(() => {
+                    finalCells[i].classList.add('combining');
+                    yCells[i].classList.add('combining');
+                }, i * 15);
+            }
+
+            await sleep(600);
+
+            for (let i = 0; i < NUM_BYTES; i++) {
+                setTimeout(() => {
+                    const isTrue = dataFinal[i] === 'FF' && dataY[i] === 'FF';
+                    
+                    finalCells[i].classList.remove('combining');
+                    yCells[i].classList.remove('combining');
+
+                    if (isTrue) {
+                        finalCells[i].textContent = 'FF';
+                        finalCells[i].className = 'register-cell h-7 sm:h-9 rounded border flex items-center justify-center code-font text-[10px] sm:text-[11px] val-final-match';
+                        successCount++;
+                    } else {
+                        finalCells[i].textContent = '00';
+                        finalCells[i].className = 'register-cell h-7 sm:h-9 rounded border flex items-center justify-center code-font text-[10px] sm:text-[11px] val-00';
+                    }
+
+                    if (i === NUM_BYTES - 1) {
+                        codeLine2.classList.remove('bg-slate-800/80', 'border-emerald-500/50', 'shadow-[0_0_15px_rgba(16,185,129,0.1)]');
+                        btnReset.style.display = 'block';
+                        expBox.innerHTML = `<strong class='text-emerald-400'>Complete!</strong><br><br>Out of 32 pixels, exactly <strong>${successCount} pixels</strong> passed all three green-screen tests (Cb, Cr, and Y).<br><br>The CPU uses <code>_mm256_movemask_epi8</code> to extract this final state, allowing the neural network to completely skip calculating the edges for those ${successCount} pure-green pixels!`;
+                    }
+                }, i * 15);
+            }
+        }
+
+        // Bind Events
+        btnStep1.addEventListener('click', runStep1);
+        btnStep2.addEventListener('click', runStep2);
+        btnReset.addEventListener('click', initData);
+
+        // Start
+        initData();
+
+    </script>
+</body>
+</html>
