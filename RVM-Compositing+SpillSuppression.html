@@ -21,7 +21,6 @@
 
         .code-font { font-family: 'JetBrains Mono', monospace; }
 
-        /* Custom Scrollbar */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
@@ -53,9 +52,23 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
+            object-fit: cover;
         }
 
-        /* Custom Wipe Slider */
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.9);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #38bdf8;
+            transition: opacity 0.5s;
+        }
+
         .wipe-slider-container {
             position: absolute;
             top: 0;
@@ -87,7 +100,6 @@
             background: #fff;
             cursor: ew-resize;
             box-shadow: 0 0 10px rgba(0,0,0,0.8), 0 0 5px rgba(255,255,255,0.8);
-            position: relative;
         }
 
         .wipe-slider::-moz-range-thumb {
@@ -100,7 +112,6 @@
             border-radius: 0;
         }
 
-        /* Math Display Boxes */
         .math-box {
             background: #0f172a;
             border: 1px solid #334155;
@@ -142,18 +153,21 @@
         .highlight-green { color: #22c55e; text-shadow: 0 0 8px rgba(34,197,94,0.5); }
         .highlight-red { color: #ef4444; text-shadow: 0 0 8px rgba(239,68,68,0.5); }
         .highlight-blue { color: #38bdf8; text-shadow: 0 0 8px rgba(56,189,248,0.5); }
-        .highlight-purple { color: #a855f7; text-shadow: 0 0 8px rgba(168,85,247,0.5); }
 
         .active-rvm { border-color: #22c55e; box-shadow: 0 0 15px rgba(34, 197, 94, 0.2); }
         .active-naive { border-color: #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.2); }
 
+        .pulse { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
 </head>
 <body>
 
 <div class="max-w-[1200px] w-full panel flex flex-col overflow-hidden">
     
-    <!-- Header -->
     <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center shrink-0">
         <div>
             <h2 class="text-xl font-bold text-sky-400">CUDA Compositing & Spill Suppression</h2>
@@ -164,7 +178,6 @@
         </div>
     </div>
 
-    <!-- Main Content -->
     <div class="flex flex-col lg:flex-row p-6 gap-6">
         
         <!-- Left Column: Math & Hover Data -->
@@ -177,7 +190,7 @@
                 </h3>
                 
                 <p class="text-xs text-slate-400 mb-4 pb-4 border-b border-slate-800">
-                    Hover over the "fuzzy hair" edges on the canvas to see how the Alpha mathematically blends the colors. Drag the slider to compare the equations.
+                    Hover over the curly hair edges on the canvas to see how the Alpha mathematically blends the colors. Drag the slider to compare the RVM Output vs a standard Green Screen.
                 </p>
 
                 <!-- Current Mode Indicator -->
@@ -185,9 +198,7 @@
                     RVM Method (Purified)
                 </div>
 
-                <!-- The Math Equation Blocks -->
                 <div class="flex flex-col gap-2">
-                    
                     <div class="flex gap-2">
                         <div class="math-box flex-1">
                             <span class="text-[10px] text-slate-400 uppercase">Alpha (α)</span>
@@ -223,7 +234,6 @@
                         <span class="code-font font-bold text-2xl text-white mt-1" id="val-out">0, 0, 0</span>
                         <div class="color-preview h-3" id="color-out"></div>
                     </div>
-
                 </div>
             </div>
 
@@ -239,13 +249,17 @@
 
             <!-- Main Render Area -->
             <div class="canvas-container" id="main-container">
+                <div class="loading-overlay" id="loading-overlay">
+                    <svg class="w-8 h-8 mb-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    <span class="pulse">Downloading High-Res Photographs...</span>
+                </div>
                 <canvas id="renderCanvas" width="600" height="400"></canvas>
                 <div class="wipe-slider-container">
-                    <input type="range" min="0" max="600" value="300" class="wipe-slider" id="wipeSlider">
+                    <input type="range" min="0" max="600" value="300" class="wipe-slider" id="wipeSlider" disabled>
                 </div>
             </div>
 
-            <!-- Ingredient Canvases (Generated Procedurally) -->
+            <!-- Ingredient Canvases -->
             <div class="grid grid-cols-4 gap-4 mt-6">
                 <div>
                     <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 text-center">New Background (B)</div>
@@ -270,7 +284,8 @@
 </div>
 
 <script>
-    //    const WIDTH = 600;
+    // Critical Internal Resolution (Mapped via CSS)
+    const WIDTH = 600;
     const HEIGHT = 400;
 
     // Main Canvas
@@ -297,6 +312,7 @@
     const wipeSlider = document.getElementById('wipeSlider');
     const mainContainer = document.getElementById('main-container');
     const hoverCoords = document.getElementById('hover-coords');
+    const loadingOverlay = document.getElementById('loading-overlay');
     
     const valAlpha = document.getElementById('val-alpha');
     const valInvAlpha = document.getElementById('val-inv-alpha');
@@ -314,66 +330,153 @@
 
     // Data buffers to mimic CUDA memory
     let dataBg, dataAlpha, dataRaw, dataPure, dataOut;
+    let isReady = false;
 
-    //    function generateAssets() {
-        // 1. Generate New Background (B): A Sci-Fi Gradient
-        const gradBg = ctxBg.createLinearGradient(0, 0, WIDTH, HEIGHT);
-        gradBg.addColorStop(0, '#1e1b4b'); // Deep Blue/Purple
-        gradBg.addColorStop(0.5, '#4c1d95'); // Purple
-        gradBg.addColorStop(1, '#be123c'); // Pink/Red
-        ctxBg.fillStyle = gradBg;
-        ctxBg.fillRect(0, 0, WIDTH, HEIGHT);
+    function loadAssets() {
+        let loadedImages = 0;
+        let imageFailed = false;
 
-        // Subject Drawing Properties (A fuzzy sphere mimicking frizzy hair)
-        const cx = WIDTH / 2;
-        const cy = HEIGHT + 50;
-        const radius = 250;
-        const skinColor = '#d97757'; // Brownish/Orange skin tone
+        const imgBg = new Image();
+        const imgPortrait = new Image();
 
-        // 2. Generate Alpha Matte (α)
-        ctxAlpha.fillStyle = '#000000'; // Black background
-        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
-        ctxAlpha.beginPath();
-        ctxAlpha.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctxAlpha.shadowColor = '#ffffff';
-        ctxAlpha.shadowBlur = 80; // Massive blur to create semi-transparent edge
-        ctxAlpha.fillStyle = '#ffffff'; // White foreground
-        ctxAlpha.fill();
-        ctxAlpha.shadowBlur = 0; // Reset
+        // CrossOrigin required to allow getImageData to read the pixels!
+        imgBg.crossOrigin = "Anonymous";
+        imgPortrait.crossOrigin = "Anonymous";
 
-        // 3. Generate Original Input (I): Subject shot on a GREEN SCREEN
-        ctxRaw.fillStyle = '#00ff00'; // Pure Green Background
-        ctxRaw.fillRect(0, 0, WIDTH, HEIGHT);
-        ctxRaw.beginPath();
-        ctxRaw.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctxRaw.shadowColor = skinColor;
-        ctxRaw.shadowBlur = 80; // The blur mixes skin color with the green background = GREEN SPILL
-        ctxRaw.fillStyle = skinColor;
-        ctxRaw.fill();
-        ctxRaw.shadowBlur = 0;
+        const onImageLoad = () => {
+            loadedImages++;
+            if (loadedImages === 2) {
+                processImageBuffers(imgBg, imgPortrait);
+            }
+        };
 
-        // 4. Generate RVM Purified Foreground (F): Subject shot on a BLACK background
-        ctxPure.fillStyle = '#000000'; // Pure Black Background (No spill)
-        ctxPure.fillRect(0, 0, WIDTH, HEIGHT);
-        ctxPure.beginPath();
-        ctxPure.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctxPure.shadowColor = skinColor;
-        ctxPure.shadowBlur = 80; // The blur mixes skin color with black = Pure Foreground
-        ctxPure.fillStyle = skinColor;
-        ctxPure.fill();
-        ctxPure.shadowBlur = 0;
+        const onImageError = () => {
+            imageFailed = true;
+            loadedImages++;
+            if (loadedImages === 2) {
+                // Fallback to solid colors if Unsplash is blocked
+                processProceduralBuffers(); 
+            }
+        };
 
-        // Extract raw pixel arrays (mimicking VRAM buffers)
-        dataBg = ctxBg.getImageData(0, 0, WIDTH, HEIGHT).data;
-        dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
-        dataRaw = ctxRaw.getImageData(0, 0, WIDTH, HEIGHT).data;
-        dataPure = ctxPure.getImageData(0, 0, WIDTH, HEIGHT).data;
-        
-        // Create an empty buffer for the final output
-        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        imgBg.onload = onImageLoad;
+        imgBg.onerror = onImageError;
+        // Sci-Fi Abstract Background
+        imgBg.src = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&h=400&fit=crop";
+
+        imgPortrait.onload = onImageLoad;
+        imgPortrait.onerror = onImageError;
+        // Portrait of a woman with curly hair (perfect for matting visualization)
+        imgPortrait.src = "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?q=80&w=600&h=400&fit=crop";
     }
 
-    //    function runCompositingKernel(sliderX) {
+    function processImageBuffers(imgBg, imgPortrait) {
+        // 1. Draw Background Image (B)
+        ctxBg.drawImage(imgBg, 0, 0, WIDTH, HEIGHT);
+        dataBg = ctxBg.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        // Draw Portrait to temporary buffer to extract raw pixels
+        const tempCtx = document.createElement('canvas').getContext('2d');
+        tempCtx.canvas.width = WIDTH; tempCtx.canvas.height = HEIGHT;
+        tempCtx.drawImage(imgPortrait, 0, 0, WIDTH, HEIGHT);
+        const portraitData = tempCtx.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        // 2. Generate Alpha Matte (α)
+        // Creating an artificial soft vignette mask mapped to the portrait
+        const cx = WIDTH / 2;
+        const cy = HEIGHT / 2 + 30; // Move center slightly down
+        const gradAlpha = ctxAlpha.createRadialGradient(cx, cy, 50, cx, cy, 220);
+        gradAlpha.addColorStop(0, "rgba(255,255,255,1)");
+        gradAlpha.addColorStop(0.6, "rgba(255,255,255,0.8)"); // Simulates semi-transparent hair
+        gradAlpha.addColorStop(1, "rgba(0,0,0,1)"); // Pure background
+        
+        ctxAlpha.fillStyle = '#000';
+        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
+        ctxAlpha.fillStyle = gradAlpha;
+        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
+        dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        // 3. Generate Raw Input (I) and Purified Fore (F)
+        dataRaw = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        dataPure = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+
+        for (let i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
+            const alpha = dataAlpha[i] / 255.0;
+            const invAlpha = 1.0 - alpha;
+
+            // Purified (F): We just use the raw portrait pixels. 
+            // In a real pipeline, the AI removes green spill, outputting pure color.
+            dataPure[i]   = portraitData[i];
+            dataPure[i+1] = portraitData[i+1];
+            dataPure[i+2] = portraitData[i+2];
+            dataPure[i+3] = 255;
+
+            // Naive Original (I): We must simulate what the raw camera footage looked like.
+            // We simulate that the subject was shot on a Green Screen.
+            // We blend the portrait with pure green based on the alpha mask.
+            // This bakes the "Green Spill" permanently into the pixels!
+            dataRaw[i]   = Math.round((alpha * portraitData[i]) + (invAlpha * 0));
+            dataRaw[i+1] = Math.round((alpha * portraitData[i+1]) + (invAlpha * 255)); // Pure Green background
+            dataRaw[i+2] = Math.round((alpha * portraitData[i+2]) + (invAlpha * 0));
+            dataRaw[i+3] = 255;
+        }
+
+        // Draw generated layers to the UI mini canvases
+        ctxRaw.putImageData(new ImageData(dataRaw, WIDTH, HEIGHT), 0, 0);
+        ctxPure.putImageData(new ImageData(dataPure, WIDTH, HEIGHT), 0, 0);
+        
+        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        finishSetup();
+    }
+
+    function processProceduralBuffers() {
+        console.warn("Images failed to load (CORS/Network). Falling back to procedural shapes.");
+        
+        // Background
+        const gradBg = ctxBg.createLinearGradient(0, 0, WIDTH, HEIGHT);
+        gradBg.addColorStop(0, '#1e1b4b'); gradBg.addColorStop(1, '#be123c');
+        ctxBg.fillStyle = gradBg; ctxBg.fillRect(0, 0, WIDTH, HEIGHT);
+        dataBg = ctxBg.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        const cx = WIDTH/2, cy = HEIGHT/2, radius = 150;
+
+        // Alpha
+        ctxAlpha.fillStyle = '#000'; ctxAlpha.fillRect(0,0,WIDTH,HEIGHT);
+        ctxAlpha.beginPath(); ctxAlpha.arc(cx, cy, radius, 0, Math.PI*2);
+        ctxAlpha.shadowColor = '#fff'; ctxAlpha.shadowBlur = 50;
+        ctxAlpha.fillStyle = '#fff'; ctxAlpha.fill(); ctxAlpha.shadowBlur = 0;
+        dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        // Raw & Pure
+        ctxRaw.fillStyle = '#0f0'; ctxRaw.fillRect(0,0,WIDTH,HEIGHT);
+        ctxRaw.beginPath(); ctxRaw.arc(cx, cy, radius, 0, Math.PI*2);
+        ctxRaw.shadowColor = '#d97757'; ctxRaw.shadowBlur = 50;
+        ctxRaw.fillStyle = '#d97757'; ctxRaw.fill(); ctxRaw.shadowBlur = 0;
+        dataRaw = ctxRaw.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        ctxPure.fillStyle = '#000'; ctxPure.fillRect(0,0,WIDTH,HEIGHT);
+        ctxPure.beginPath(); ctxPure.arc(cx, cy, radius, 0, Math.PI*2);
+        ctxPure.shadowColor = '#d97757'; ctxPure.shadowBlur = 50;
+        ctxPure.fillStyle = '#d97757'; ctxPure.fill(); ctxPure.shadowBlur = 0;
+        dataPure = ctxPure.getImageData(0, 0, WIDTH, HEIGHT).data;
+
+        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        finishSetup();
+    }
+
+    function finishSetup() {
+        loadingOverlay.style.opacity = '0';
+        setTimeout(() => loadingOverlay.style.display = 'none', 500);
+        wipeSlider.disabled = false;
+        isReady = true;
+
+        runCompositingKernel(300);
+        updateMathDisplay(300, HEIGHT/2);
+    }
+
+    function runCompositingKernel(sliderX) {
+        if (!isReady) return;
+
         // This loop perfectly mimics the CUDA Kernel running the compositing equation
         for (let i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
             
@@ -391,8 +494,8 @@
 
             let fgR, fgG, fgB;
 
-            // If left of slider: Use RVM Purified Foreground (F)
-            // If right of slider: Use Original Image with Green Spill (I)
+            // Left of slider: Correct RVM Math (Purified Foreground)
+            // Right of slider: Naive Mistake Math (Original Image with Green Spill)
             if (pixelX < sliderX) {
                 fgR = dataPure[i];
                 fgG = dataPure[i+1];
@@ -421,7 +524,9 @@
         renderCtx.putImageData(imageData, 0, 0);
     }
 
-    //    function updateMathDisplay(x, y) {
+    function updateMathDisplay(x, y) {
+        if (!isReady) return;
+
         // Clamp coordinates
         x = Math.max(0, Math.min(x, WIDTH - 1));
         y = Math.max(0, Math.min(y, HEIGHT - 1));
@@ -492,7 +597,6 @@
         updateMathDisplay(x, y);
     });
 
-    // Handle touch for mobile
     mainContainer.addEventListener('touchmove', (e) => {
         const rect = renderCanvas.getBoundingClientRect();
         const scaleX = WIDTH / rect.width;
@@ -506,16 +610,8 @@
         e.preventDefault(); // Prevent scrolling while wiping
     }, {passive: false});
 
-    //    window.onload = function() {
-        // Generate the assets once
-        generateAssets();
-        
-        // Run the first composite frame
-        runCompositingKernel(300);
-        
-        // Initialize hover data in the center of the edge
-        updateMathDisplay(300, HEIGHT/2);
-    };
+    // Boot
+    window.onload = loadAssets;
 
 </script>
 </body>
