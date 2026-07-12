@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConvGRU vs Standard GRU (Spatial Awareness)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow-x: hidden;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        /* Pixel blocks */
+        .pixel {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: rgba(255,255,255,0.5);
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+
+        /* Subject Pixels (e.g. a person's shape) */
+        .px-subject {
+            background-color: #3b82f6; /* Blue */
+            border-color: #2563eb;
+            color: white;
+            font-weight: bold;
+        }
+
+        .px-bg {
+            background-color: #1e293b;
+        }
+
+        /* Dense Matrix Visual */
+        .dense-matrix {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            width: 480px;
+            height: 120px;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(185, 28, 28, 0.4));
+            border: 2px dashed #ef4444;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+
+        .dense-matrix.active { opacity: 1; }
+
+        /* Conv Kernel Window */
+        .conv-kernel {
+            position: absolute;
+            width: 90px;
+            height: 90px;
+            border: 4px solid #10b981; /* Emerald */
+            background-color: rgba(16, 185, 129, 0.2);
+            border-radius: 4px;
+            z-index: 20;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.5);
+            opacity: 0;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .conv-kernel.active { opacity: 1; }
+
+        .connection-line {
+            position: absolute;
+            background-color: #ef4444;
+            height: 2px;
+            transform-origin: left center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+
+<div class="max-w-6xl w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-5 border-b border-slate-700 flex flex-col md:flex-row justify-between items-center">
+        <div>
+            <h2 class="text-2xl font-bold text-sky-400 mb-1">Spatial Awareness: Standard GRU vs ConvGRU</h2>
+            <p class="text-sm text-slate-400">Visualizing how Neural Networks ingest a 2D Video Frame.</p>
+        </div>
+        <div class="mt-4 md:mt-0 code-font text-xs bg-slate-800 px-4 py-2 rounded text-slate-300 border border-slate-700 shadow-inner">
+            Frame Size: 4x4 Pixels
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="grid grid-cols-1 lg:grid-cols-2">
+        
+        <!-- LEFT: Standard GRU (Dense / Flattening) -->
+        <div class="p-6 md:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative flex flex-col items-center">
+            <h3 class="text-rose-400 font-bold text-lg mb-2 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                Standard GRU (Loss of Space)
+            </h3>
+            <p class="text-xs text-slate-400 text-center mb-8 h-12">
+                The 2D image must be <strong class="text-slate-200">flattened into a 1D array</strong> to be multiplied by a dense matrix. Neighboring pixels are torn apart.
+            </p>
+
+            <!-- Animation Stage -->
+            <div class="relative w-full max-w-[480px] h-[200px] mb-6 flex justify-center" id="stage-dense">
+                <!-- 4x4 Grid Container (Centered initially) -->
+                <div class="relative w-[120px] h-[120px] transition-all duration-700" id="container-dense">
+                    <!-- Pixels injected by JS -->
+                </div>
+                
+                <!-- The Dense Matrix (Appears upon flattening) -->
+                <div class="dense-matrix flex-col" id="matrix-dense">
+                    <span class="font-bold text-rose-200 text-lg">Dense Weight Matrix (W)</span>
+                    <span class="code-font text-rose-400 text-xs mt-1">Requires 16x16 = 256 parameters</span>
+                </div>
+            </div>
+
+            <button id="btn-flatten" class="px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold transition-all shadow-[0_0_15px_rgba(225,29,72,0.4)] border border-rose-400 w-48">
+                Flatten Image
+            </button>
+            
+            <div id="exp-dense" class="mt-6 p-4 bg-slate-900 border border-rose-900/50 rounded text-sm text-slate-300 opacity-50 transition-opacity text-center h-24">
+                Watch how the blue "subject" pixels (indexes 5, 6, 9, 10) are ripped apart. The network no longer knows they were next to each other!
+            </div>
+        </div>
+
+        <!-- RIGHT: ConvGRU (Spatial Preservation) -->
+        <div class="p-6 md:p-10 relative flex flex-col items-center">
+            <h3 class="text-emerald-400 font-bold text-lg mb-2 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+                ConvGRU (Spatial Preservation)
+            </h3>
+            <p class="text-xs text-slate-400 text-center mb-8 h-12">
+                The image <strong class="text-slate-200">stays in a 2D grid</strong>. A Convolutional Kernel (sliding window) processes the data, inherently understanding what pixels are neighbors.
+            </p>
+
+            <!-- Animation Stage -->
+            <div class="relative w-full max-w-[480px] h-[200px] mb-6 flex justify-center items-center" id="stage-conv">
+                <!-- 4x4 Grid Container -->
+                <div class="relative w-[120px] h-[120px]" id="container-conv">
+                    <!-- Pixels injected by JS -->
+                    
+                    <!-- 3x3 Sliding Kernel -->
+                    <div class="conv-kernel flex-col" id="kernel-conv">
+                        <span class="font-bold text-emerald-100 text-xs">3x3 Kernel (W)</span>
+                        <span class="code-font text-emerald-300 text-[10px] mt-1 text-center">9 params<br>Shared</span>
+                    </div>
+                </div>
+            </div>
+
+            <button id="btn-convolve" class="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold transition-all shadow-[0_0_15px_rgba(16,185,129,0.4)] border border-emerald-400 w-48">
+                Run Convolution
+            </button>
+            
+            <div id="exp-conv" class="mt-6 p-4 bg-slate-900 border border-emerald-900/50 rounded text-sm text-slate-300 opacity-50 transition-opacity text-center h-24">
+                The 3x3 kernel perfectly covers the 2D neighborhood. It processes the "head" and "body" pixels simultaneously, retaining the shape geometry.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Grid Setup Variables
+    const ROWS = 4;
+    const COLS = 4;
+    const PX_SIZE = 30; // 30x30 pixels
+    
+    // Define a simple shape: a 2x2 "subject" in the middle
+    // Indexes: 0-15. Middle 2x2 is at indexes 5, 6, 9, 10
+    const subjectIndexes = [5, 6, 9, 10];
+
+    // DOM Elements
+    const containerDense = document.getElementById('container-dense');
+    const containerConv = document.getElementById('container-conv');
+    const matrixDense = document.getElementById('matrix-dense');
+    const kernelConv = document.getElementById('kernel-conv');
+    
+    const btnFlatten = document.getElementById('btn-flatten');
+    const btnConvolve = document.getElementById('btn-convolve');
+    
+    const expDense = document.getElementById('exp-dense');
+    const expConv = document.getElementById('exp-conv');
+
+    let densePixels = [];
+    let convPixels = [];
+    let isFlattened = false;
+    let isConvolving = false;
+
+    // Helper: Initialize the grids
+    function initGrid(container, arr) {
+        container.innerHTML = '';
+        arr.length = 0; // Clear array
+
+        for (let i = 0; i < ROWS * COLS; i++) {
+            const px = document.createElement('div');
+            
+            // Determine starting 2D positions
+            const row = Math.floor(i / COLS);
+            const col = i % COLS;
+            
+            px.className = `pixel ${subjectIndexes.includes(i) ? 'px-subject' : 'px-bg'}`;
+            px.style.top = `${row * PX_SIZE}px`;
+            px.style.left = `${col * PX_SIZE}px`;
+            px.innerText = i; // Label index
+
+            container.appendChild(px);
+            arr.push(px);
+        }
+    }
+
+    // Initialize both grids
+    initGrid(containerDense, densePixels);
+    initGrid(containerConv, convPixels);
+    
+    // Add kernel back to conv container since initGrid clears it
+    containerConv.appendChild(kernelConv);
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // --- ANIMATION 1: STANDARD GRU FLATTENING ---
+    btnFlatten.addEventListener('click', async () => {
+        if (isFlattened) {
+            // Reset to 2D Grid
+            btnFlatten.disabled = true;
+            matrixDense.classList.remove('active');
+            expDense.classList.remove('opacity-100');
+            expDense.classList.add('opacity-50');
+            
+            // Move container back to center
+            containerDense.style.transform = `translateX(0px) translateY(0px)`;
+
+            densePixels.forEach((px, i) => {
+                const row = Math.floor(i / COLS);
+                const col = i % COLS;
+                px.style.top = `${row * PX_SIZE}px`;
+                px.style.left = `${col * PX_SIZE}px`;
+            });
+
+            await sleep(800);
+            btnFlatten.innerText = "Flatten Image";
+            isFlattened = false;
+            btnFlatten.disabled = false;
+        } else {
+            // Flatten to 1D Array
+            btnFlatten.disabled = true;
+            
+            // Shift the container to the far left to accommodate the 480px line
+            // Container was centered, 480px wide line needs space
+            containerDense.style.transform = `translateX(-180px) translateY(-30px)`;
+
+            densePixels.forEach((px, i) => {
+                // Line them up horizontally (1D array)
+                px.style.top = `0px`;
+                px.style.left = `${i * PX_SIZE}px`;
+            });
+
+            await sleep(800); // Wait for movement
+
+            // Fade in the heavy dense matrix below it
+            matrixDense.classList.add('active');
+            expDense.classList.remove('opacity-50');
+            expDense.classList.add('opacity-100');
+
+            btnFlatten.innerText = "Reset to 2D";
+            isFlattened = true;
+            btnFlatten.disabled = false;
+        }
+    });
+
+    // --- ANIMATION 2: CONVGRU SLIDING KERNEL ---
+    btnConvolve.addEventListener('click', async () => {
+        if (isConvolving) return;
+        isConvolving = true;
+        btnConvolve.disabled = true;
+
+        expConv.classList.remove('opacity-50');
+        expConv.classList.add('opacity-100');
+        kernelConv.classList.add('active');
+
+        // The 3x3 kernel sliding on a 4x4 grid has exactly 4 valid positions (stride=1)
+        // Position 1: top-left (0,0)
+        // Position 2: top-right (col 1)
+        // Position 3: bottom-left (row 1)
+        // Position 4: bottom-right (row 1, col 1)
+        
+        const positions = [
+            { top: 0, left: 0 },
+            { top: 0, left: PX_SIZE },
+            { top: PX_SIZE, left: 0 },
+            { top: PX_SIZE, left: PX_SIZE }
+        ];
+
+        for (let i = 0; i < positions.length; i++) {
+            const pos = positions[i];
+            
+            // Move Kernel
+            kernelConv.style.top = `${pos.top}px`;
+            kernelConv.style.left = `${pos.left}px`;
+            
+            // Highlight underlying pixels
+            // Calculate which pixels are under the 3x3 kernel
+            const rOffset = pos.top / PX_SIZE;
+            const cOffset = pos.left / PX_SIZE;
+            
+            convPixels.forEach((px, idx) => {
+                const r = Math.floor(idx / COLS);
+                const c = idx % COLS;
+                
+                if (r >= rOffset && r < rOffset + 3 && c >= cOffset && c < cOffset + 3) {
+                    px.style.transform = 'scale(0.85)';
+                    px.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.8)';
+                    px.style.borderColor = '#10b981';
+                } else {
+                    px.style.transform = 'scale(1)';
+                    px.style.boxShadow = 'none';
+                    px.style.borderColor = 'rgba(255,255,255,0.1)';
+                }
+            });
+
+            await sleep(1000); // Pause at each step
+        }
+
+        // Reset Kernel
+        kernelConv.classList.remove('active');
+        convPixels.forEach(px => {
+            px.style.transform = 'scale(1)';
+            px.style.boxShadow = 'none';
+            px.style.borderColor = 'rgba(255,255,255,0.1)';
+        });
+        
+        await sleep(500);
+        expConv.classList.remove('opacity-100');
+        expConv.classList.add('opacity-50');
+
+        isConvolving = false;
+        btnConvolve.disabled = false;
+    });
+
+</script>
+</body>
+</html>
