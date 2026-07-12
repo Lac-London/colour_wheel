@@ -175,10 +175,10 @@
         </div>
     </div>
 
-    <div class="flex flex-col h-auto">
+    <div class="flex flex-col lg:flex-row h-auto min-h-[600px]">
         
-        <!-- Top: C++ Code Panel -->
-        <div class="w-full bg-slate-950 p-6 flex flex-col border-b border-slate-700 overflow-y-auto">
+        <!-- Left: C++ Code Panel -->
+        <div class="w-full lg:w-5/12 bg-slate-950 p-6 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-700 overflow-y-auto">
             <div class="flex items-center gap-2 mb-4">
                 <div class="w-3 h-3 rounded-full bg-red-500"></div>
                 <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
@@ -208,12 +208,13 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
 </pre>
             </div>
 
-            <div id="exp-box" class="mt-4 bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300 shadow-inner">
+            <div id="exp-box" class="mt-auto bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300 shadow-inner">
                 Click <strong>Start Frame Loop</strong> to visualize the execution.
             </div>
         </div>
 
-        <div class="w-full p-6 bg-slate-900 flex flex-col relative min-h-[600px]" id="vis-area">
+        <!-- Right: Hardware Visualization -->
+        <div class="w-full lg:w-7/12 p-6 bg-slate-900 flex flex-col relative min-h-[600px] lg:min-h-0" id="vis-area">
             
             <!-- CPU Zone -->
             <div class="hw-zone cpu-zone h-[120px] w-full mb-4 relative">
