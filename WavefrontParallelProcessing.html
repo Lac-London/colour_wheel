@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wavefront Parallel Processing (WPP) Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        .video-frame {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 2px;
+            background: #1e293b;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+            position: relative;
+        }
+
+        .macroblock {
+            aspect-ratio: 1;
+            background-color: #334155;
+            border-radius: 4px;
+            border: 1px solid #475569;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: rgba(255,255,255,0.3);
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        /* State Classes */
+        .mb-waiting { background-color: #334155; }
+        
+        .mb-processing {
+            background-color: #0ea5e9;
+            border-color: #38bdf8;
+            color: white;
+            box-shadow: 0 0 15px rgba(14, 165, 233, 0.6);
+            transform: scale(1.1);
+            z-index: 10;
+        }
+
+        .mb-done {
+            background-color: #10b981;
+            border-color: #059669;
+            color: rgba(255,255,255,0.8);
+        }
+
+        /* Dependency Arrows */
+        .dep-arrow {
+            position: absolute;
+            background-color: #ef4444;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 5;
+        }
+        
+        /* Arrow Left (Depends on Left block) */
+        .dep-left {
+            top: 50%;
+            left: -12px;
+            width: 10px;
+            height: 2px;
+            transform: translateY(-50%);
+        }
+        .dep-left::before {
+            content: '';
+            position: absolute;
+            left: -4px;
+            top: -3px;
+            border-top: 4px solid transparent;
+            border-bottom: 4px solid transparent;
+            border-right: 6px solid #ef4444;
+        }
+
+        /* Arrow Top-Right (Depends on Top-Right block) */
+        .dep-tr {
+            top: -10px;
+            right: -10px;
+            width: 14px;
+            height: 2px;
+            transform: rotate(-45deg);
+            transform-origin: left center;
+        }
+        .dep-tr::before {
+            content: '';
+            position: absolute;
+            right: -4px;
+            top: -3px;
+            border-top: 4px solid transparent;
+            border-bottom: 4px solid transparent;
+            border-left: 6px solid #ef4444;
+        }
+
+        .show-deps .dep-arrow { opacity: 0.8; }
+
+        /* Thread Indicators */
+        .thread-label {
+            position: absolute;
+            left: -90px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: #94a3b8;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .thread-active { color: #0ea5e9; opacity: 1; }
+
+        .stats-panel {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="max-w-5xl w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-5 border-b border-slate-700 flex flex-col md:flex-row justify-between items-center z-10 relative">
+        <div>
+            <h2 class="text-2xl font-bold text-sky-400 mb-1">Wavefront Parallel Processing (WPP)</h2>
+            <p class="text-sm text-slate-400">Visualizing highly-threaded VVC (H.266) Decoding.</p>
+        </div>
+        <div class="flex gap-4 mt-4 md:mt-0">
+            <button id="btn-seq" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded text-sm font-bold border border-slate-500 transition-colors">Sequential (1 Thread)</button>
+            <button id="btn-wpp" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded text-sm font-bold border border-sky-400 shadow-[0_0_15px_rgba(14,165,233,0.4)] transition-all">WPP (Multi-Thread)</button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4">
+        
+        <!-- Left: Visualization -->
+        <div class="lg:col-span-3 p-6 md:p-10 border-b lg:border-b-0 lg:border-r border-slate-700 relative flex justify-center items-center overflow-x-auto pl-24">
+            
+            <div id="video-frame" class="video-frame">
+                <!-- Thread Labels -->
+                <div id="t-label-0" class="thread-label" style="top: 0; height: calc(100%/8);">Thread 0</div>
+                <div id="t-label-1" class="thread-label" style="top: calc(100%/8 * 1); height: calc(100%/8);">Thread 1</div>
+                <div id="t-label-2" class="thread-label" style="top: calc(100%/8 * 2); height: calc(100%/8);">Thread 2</div>
+                <div id="t-label-3" class="thread-label" style="top: calc(100%/8 * 3); height: calc(100%/8);">Thread 3</div>
+                <div id="t-label-4" class="thread-label" style="top: calc(100%/8 * 4); height: calc(100%/8);">Thread 4</div>
+                <div id="t-label-5" class="thread-label" style="top: calc(100%/8 * 5); height: calc(100%/8);">Thread 5</div>
+                <div id="t-label-6" class="thread-label" style="top: calc(100%/8 * 6); height: calc(100%/8);">Thread 6</div>
+                <div id="t-label-7" class="thread-label" style="top: calc(100%/8 * 7); height: calc(100%/8);">Thread 7</div>
+
+                <!-- Blocks injected via JS -->
+            </div>
+
+        </div>
+
+        <!-- Right: Stats & Explanation -->
+        <div class="p-6 bg-slate-900 flex flex-col justify-between">
+            
+            <div>
+                <h3 class="text-emerald-400 font-bold mb-4 uppercase tracking-wider text-sm border-b border-slate-700 pb-2">Decoder Status</h3>
+                
+                <div class="stats-panel space-y-4">
+                    <div>
+                        <div class="text-xs text-slate-500 mb-1">Mode</div>
+                        <div id="stat-mode" class="code-font text-sky-400 font-bold">Idle</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-slate-500 mb-1">Active CPU Threads</div>
+                        <div id="stat-threads" class="text-2xl code-font font-bold text-white">0</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-slate-500 mb-1">Clock Cycles Elapsed</div>
+                        <div id="stat-cycles" class="text-2xl code-font font-bold text-white">0</div>
+                    </div>
+                    <div>
+                        <div class="text-xs text-slate-500 mb-1">Blocks Decoded</div>
+                        <div class="text-lg code-font text-emerald-400"><span id="stat-blocks">0</span> / 96</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 bg-slate-800 p-4 rounded border border-slate-700 text-sm text-slate-300">
+                <h4 id="exp-title" class="font-bold text-white mb-2">The Dependency Problem</h4>
+                <p id="exp-text" class="text-xs leading-relaxed">
+                    VVC blocks cannot be decoded randomly. Because of spatial prediction, a block absolutely requires the block to its <strong>Left</strong> and the block to its <strong>Top-Right</strong> to be finished first before it can begin decoding.
+                </p>
+                
+                <label class="flex items-center gap-2 mt-4 cursor-pointer">
+                    <input type="checkbox" id="chk-deps" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-sky-500 focus:ring-sky-500 focus:ring-offset-slate-800" checked>
+                    <span class="text-xs font-bold text-rose-400">Show Block Dependencies</span>
+                </label>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    const ROWS = 8;
+    const COLS = 12;
+    const TOTAL_BLOCKS = ROWS * COLS;
+    const WPP_DELAY = 2; // In WPP, row N+1 starts when row N is at block 2
+
+    const videoFrame = document.getElementById('video-frame');
+    const chkDeps = document.getElementById('chk-deps');
+    
+    // Stats UI
+    const statMode = document.getElementById('stat-mode');
+    const statThreads = document.getElementById('stat-threads');
+    const statCycles = document.getElementById('stat-cycles');
+    const statBlocks = document.getElementById('stat-blocks');
+    const expTitle = document.getElementById('exp-title');
+    const expText = document.getElementById('exp-text');
+
+    // Controls
+    const btnSeq = document.getElementById('btn-seq');
+    const btnWpp = document.getElementById('btn-wpp');
+
+    let blocks = [];
+    let isRunning = false;
+    let currentAnimationId = 0;
+
+    // --- Initialization ---
+
+    function initGrid() {
+        videoFrame.querySelectorAll('.macroblock').forEach(el => el.remove());
+        blocks = [];
+
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const block = document.createElement('div');
+                block.className = 'macroblock mb-waiting';
+                
+                // Add dependencies visually
+                if (c > 0) {
+                    const depLeft = document.createElement('div');
+                    depLeft.className = 'dep-arrow dep-left';
+                    block.appendChild(depLeft);
+                }
+                if (r > 0 && c < COLS - 1) {
+                    const depTr = document.createElement('div');
+                    depTr.className = 'dep-arrow dep-tr';
+                    block.appendChild(depTr);
+                }
+
+                videoFrame.appendChild(block);
+                blocks.push({ r, c, el: block, state: 'waiting' });
+            }
+        }
+        
+        toggleDependencies();
+    }
+
+    function toggleDependencies() {
+        if (chkDeps.checked) {
+            videoFrame.classList.add('show-deps');
+        } else {
+            videoFrame.classList.remove('show-deps');
+        }
+    }
+
+    chkDeps.addEventListener('change', toggleDependencies);
+
+    const sleep = ms => new Promise(res => setTimeout(resolve => res(), ms));
+
+    function resetSimulation() {
+        blocks.forEach(b => {
+            b.state = 'waiting';
+            b.el.className = 'macroblock mb-waiting';
+            b.el.innerText = '';
+        });
+        
+        for(let i=0; i<ROWS; i++) {
+            document.getElementById(`t-label-${i}`).classList.remove('thread-active');
+        }
+
+        statThreads.innerText = "0";
+        statCycles.innerText = "0";
+        statBlocks.innerText = "0";
+    }
+
+    // --- Sequential Decoder (1 Thread) ---
+    
+    async function runSequential() {
+        if (isRunning) return;
+        isRunning = true;
+        currentAnimationId++;
+        const animId = currentAnimationId;
+        
+        btnSeq.disabled = true;
+        btnWpp.disabled = true;
+        resetSimulation();
+        
+        statMode.innerText = "Sequential";
+        statMode.className = "code-font text-slate-400 font-bold";
+        expTitle.innerText = "The Old Way (H.264 / HEVC)";
+        expText.innerHTML = "Because every block waits on the ones above and to the left, older decoders processed the entire image one block at a time. The CPU is severely bottlenecked, using only <strong>1 Thread</strong>.";
+
+        let cycles = 0;
+        let decoded = 0;
+
+        document.getElementById(`t-label-0`).classList.add('thread-active');
+
+        for (let r = 0; r < ROWS; r++) {
+            // Update thread label visually to follow the single thread
+            for(let i=0; i<ROWS; i++) document.getElementById(`t-label-${i}`).classList.remove('thread-active');
+            document.getElementById(`t-label-${r}`).classList.add('thread-active');
+
+            for (let c = 0; c < COLS; c++) {
+                if (currentAnimationId !== animId) return; // Cancel if new sim started
+
+                const idx = r * COLS + c;
+                const b = blocks[idx];
+
+                statThreads.innerText = "1";
+                
+                // Processing
+                b.el.classList.remove('mb-waiting');
+                b.el.classList.add('mb-processing');
+                b.el.innerText = '⚙️';
+                
+                await sleep(50); // Simulate processing time
+                
+                // Done
+                b.el.classList.remove('mb-processing');
+                b.el.classList.add('mb-done');
+                b.el.innerText = '✓';
+                
+                cycles++;
+                decoded++;
+                statCycles.innerText = cycles;
+                statBlocks.innerText = decoded;
+            }
+        }
+
+        for(let i=0; i<ROWS; i++) document.getElementById(`t-label-${i}`).classList.remove('thread-active');
+        statThreads.innerText = "0";
+        isRunning = false;
+        btnSeq.disabled = false;
+        btnWpp.disabled = false;
+    }
+
+
+    // --- WPP Decoder (Multi-Threaded) ---
+    
+    async function runWPP() {
+        if (isRunning) return;
+        isRunning = true;
+        currentAnimationId++;
+        const animId = currentAnimationId;
+        
+        btnSeq.disabled = true;
+        btnWpp.disabled = true;
+        resetSimulation();
+        
+        statMode.innerText = "WPP Enabled";
+        statMode.className = "code-font text-sky-400 font-bold";
+        expTitle.innerText = "The Wavefront Advantage";
+        expText.innerHTML = "Look closely at the dependencies. Thread 2 doesn't have to wait for Thread 1 to finish the whole row. As soon as Thread 1 finishes the first 2 blocks, the Top-Right dependency for row 2 is satisfied! <strong>Multiple threads cascade across the image diagonally.</strong>";
+
+        let cycles = 0;
+        let decoded = 0;
+        
+        // Track the current column position of each row's thread
+        let threadColPos = new Array(ROWS).fill(-1);
+        
+        while (decoded < TOTAL_BLOCKS) {
+            if (currentAnimationId !== animId) return;
+
+            let activeThreadsThisCycle = 0;
+
+            // In a single clock cycle, try to advance every thread
+            for (let r = 0; r < ROWS; r++) {
+                // Should this thread start?
+                // Rule: Row N can start if Row N-1 is at least WPP_DELAY blocks ahead
+                if (r === 0 || (threadColPos[r-1] >= WPP_DELAY)) {
+                    
+                    // If the thread hasn't finished its row
+                    if (threadColPos[r] < COLS - 1) {
+                        activeThreadsThisCycle++;
+                        document.getElementById(`t-label-${r}`).classList.add('thread-active');
+                        
+                        // Advance the thread 1 block
+                        threadColPos[r]++;
+                        const c = threadColPos[r];
+                        const idx = r * COLS + c;
+                        const b = blocks[idx];
+
+                        // Mark as processing visually
+                        b.el.classList.remove('mb-waiting');
+                        b.el.classList.add('mb-processing');
+                        b.el.innerText = `T${r}`;
+                    } else {
+                        document.getElementById(`t-label-${r}`).classList.remove('thread-active');
+                    }
+                }
+            }
+
+            statThreads.innerText = activeThreadsThisCycle;
+            
+            // Wait for clock cycle to tick
+            await sleep(100);
+            cycles++;
+            statCycles.innerText = cycles;
+
+            // Mark blocks done
+            for (let r = 0; r < ROWS; r++) {
+                const c = threadColPos[r];
+                if (c >= 0 && c < COLS) {
+                    const idx = r * COLS + c;
+                    const b = blocks[idx];
+                    
+                    if (b.state !== 'done') {
+                        b.state = 'done';
+                        b.el.classList.remove('mb-processing');
+                        b.el.classList.add('mb-done');
+                        b.el.innerText = '✓';
+                        decoded++;
+                        statBlocks.innerText = decoded;
+                    }
+                }
+            }
+        }
+
+        for(let i=0; i<ROWS; i++) document.getElementById(`t-label-${i}`).classList.remove('thread-active');
+        statThreads.innerText = "0";
+        isRunning = false;
+        btnSeq.disabled = false;
+        btnWpp.disabled = false;
+    }
+
+    // Bind Buttons
+    btnSeq.addEventListener('click', runSequential);
+    btnWpp.addEventListener('click', runWPP);
+
+    // Start
+    initGrid();
+
+</script>
+</body>
+</html>
