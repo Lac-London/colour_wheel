@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Compositing Equation Visualizer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f4f5f7;
+            padding: 20px;
+            color: #333;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 850px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+        .header {
+            text-align: center;
+        }
+        .header h2 {
+            margin: 0 0 5px 0;
+            color: #172b4d;
+        }
+        .header p {
+            margin: 0;
+            color: #5e6c84;
+            font-size: 0.95em;
+        }
+
+        .equation-layout {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 10px 0;
+            padding: 20px;
+            background: #fafbfc;
+            border: 1px solid #dfe1e6;
+            border-radius: 12px;
+        }
+        .math-sign {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #7a869a;
+            padding: 0 5px;
+        }
+        .box-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            gap: 10px;
+        }
+        .color-box {
+            width: 110px;
+            height: 110px;
+            border-radius: 12px;
+            border: 2px solid #dfe1e6;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .color-box::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: linear-gradient(45deg, #ccc 25%, transparent 25%), 
+                              linear-gradient(-45deg, #ccc 25%, transparent 25%), 
+                              linear-gradient(45deg, transparent 75%, #ccc 75%), 
+                              linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 10px 10px;
+            background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+            z-index: 1;
+            opacity: 0.15;
+            pointer-events: none;
+        }
+        .box-fill {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 2;
+            transition: background-color 0.1s;
+        }
+        .box-label {
+            font-weight: 600;
+            color: #172b4d;
+            font-size: 1em;
+            text-align: center;
+            height: 40px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .box-rgb {
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.85em;
+            color: #5e6c84;
+            background: #ebecf0;
+            padding: 4px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #f4f5f7;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #dfe1e6;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .control-row label {
+            font-weight: 600;
+            width: 220px;
+            color: #172b4d;
+        }
+        input[type=range] {
+            flex-grow: 1;
+            cursor: pointer;
+        }
+        .color-inputs {
+            display: flex;
+            gap: 30px;
+            width: 100%;
+        }
+        .color-inputs .control-row {
+            flex: 1;
+        }
+        input[type=color] {
+            cursor: pointer;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            background: none;
+        }
+
+        .explanation {
+            background: #e6fcff;
+            border-left: 4px solid #0052cc;
+            padding: 16px;
+            border-radius: 4px;
+        }
+        .explanation h4 {
+            margin: 0 0 8px 0;
+            color: #0052cc;
+        }
+        .explanation p {
+            margin: 0;
+            font-size: 0.95em;
+            line-height: 1.5;
+            color: #172b4d;
+        }
+        .math-breakdown {
+            margin-top: 15px;
+            font-family: "Courier New", Courier, monospace;
+            background: rgba(255,255,255,0.7);
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto 1fr;
+            gap: 10px;
+            align-items: center;
+            text-align: center;
+        }
+        .math-col {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .highlight {
+            color: #ff5630;
+            font-weight: bold;
+        }
+        .highlight-blue {
+            color: #0052cc;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>The Full Compositing Equation</h2>
+        <p>$$ C = (\alpha \times F) + ((1 - \alpha) \times B) $$</p>
+    </div>
+
+    <div class="equation-layout">
+        <!-- Foreground Contribution Box -->
+        <div class="box-container">
+            <span class="box-label">Foreground Part<br>(α × F)</span>
+            <div class="color-box">
+                <div class="box-fill" id="fillF"></div>
+            </div>
+            <span class="box-rgb" id="rgbF">rgb(0,0,0)</span>
+        </div>
+
+        <div class="math-sign">+</div>
+
+        <!-- Background Contribution Box -->
+        <div class="box-container">
+            <span class="box-label">Background Part<br>((1 - α) × B)</span>
+            <div class="color-box">
+                <div class="box-fill" id="fillB"></div>
+            </div>
+            <span class="box-rgb" id="rgbB">rgb(0,0,0)</span>
+        </div>
+
+        <div class="math-sign">=</div>
+
+        <!-- Final Composite Result Box -->
+        <div class="box-container">
+            <span class="box-label">Final Pixel<br>(C)</span>
+            <div class="color-box">
+                <div class="box-fill" id="fillResult"></div>
+            </div>
+            <span class="box-rgb" id="rgbResult" style="font-weight:bold; color:#172b4d;">rgb(0,0,0)</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="color-inputs">
+            <div class="control-row">
+                <label for="colorF">Foreground (Hair) Color:</label>
+                <input type="color" id="colorF" value="#4A2F1D"> <!-- Dark Brown Default -->
+            </div>
+            <div class="control-row">
+                <label for="colorB">Background (Sky) Color:</label>
+                <input type="color" id="colorB" value="#0096FF"> <!-- Bright Blue Default -->
+            </div>
+        </div>
+        <div class="control-row">
+            <label for="alphaSlider">Pixel Coverage (Alpha α):</label>
+            <input type="range" id="alphaSlider" min="0" max="1" step="0.01" value="0.5">
+            <span id="sliderValueDisplay" style="font-weight: bold; width: 40px; color: #ff5630;">0.50</span>
+        </div>
+    </div>
+
+    <div class="explanation">
+        <h4 id="expTitle">Strand of Hair Example (Alpha = 0.5)</h4>
+        <p id="expText">The math perfectly mixes 50% of the brown hair color with 50% of the blue sky color. When you zoom out, this creates a perfectly soft, realistic edge where the hair gently blends into the sky.</p>
+        
+        <div class="math-breakdown" id="mathBreakdown">
+            <!-- Populated dynamically via JS -->
+        </div>
+    </div>
+</div>
+
+<script>
+    const colorF_input = document.getElementById('colorF');
+    const colorB_input = document.getElementById('colorB');
+    const alphaSlider = document.getElementById('alphaSlider');
+    const sliderValueDisplay = document.getElementById('sliderValueDisplay');
+    
+    const fillF = document.getElementById('fillF');
+    const rgbF = document.getElementById('rgbF');
+    
+    const fillB = document.getElementById('fillB');
+    const rgbB = document.getElementById('rgbB');
+    
+    const fillResult = document.getElementById('fillResult');
+    const rgbResult = document.getElementById('rgbResult');
+
+    const expTitle = document.getElementById('expTitle');
+    const expText = document.getElementById('expText');
+    const mathBreakdown = document.getElementById('mathBreakdown');
+
+    // Convert Hex to RGB array
+    function hexToRgb(hex) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return [r, g, b];
+    }
+
+    function updateVisuals() {
+        // 1. Get raw RGB values and Alpha
+        const fRgb = hexToRgb(colorF_input.value);
+        const bRgb = hexToRgb(colorB_input.value);
+        const alpha = parseFloat(alphaSlider.value);
+        const invAlpha = 1.0 - alpha;
+        
+        sliderValueDisplay.innerText = alpha.toFixed(2);
+
+        // 2. Calculate Foreground Contribution: (α * F)
+        const fOut = [
+            Math.round(fRgb[0] * alpha),
+            Math.round(fRgb[1] * alpha),
+            Math.round(fRgb[2] * alpha)
+        ];
+        fillF.style.backgroundColor = `rgb(${fOut[0]}, ${fOut[1]}, ${fOut[2]})`;
+        rgbF.innerHTML = `<span>(F × ${alpha.toFixed(2)})</span><strong>${fOut[0]}, ${fOut[1]}, ${fOut[2]}</strong>`;
+
+        // 3. Calculate Background Contribution: ((1 - α) * B)
+        const bOut = [
+            Math.round(bRgb[0] * invAlpha),
+            Math.round(bRgb[1] * invAlpha),
+            Math.round(bRgb[2] * invAlpha)
+        ];
+        fillB.style.backgroundColor = `rgb(${bOut[0]}, ${bOut[1]}, ${bOut[2]})`;
+        rgbB.innerHTML = `<span>(B × ${invAlpha.toFixed(2)})</span><strong>${bOut[0]}, ${bOut[1]}, ${bOut[2]}</strong>`;
+
+        // 4. Calculate Final Composite (C)
+        const cOut = [
+            fOut[0] + bOut[0],
+            fOut[1] + bOut[1],
+            fOut[2] + bOut[2]
+        ];
+        fillResult.style.backgroundColor = `rgb(${cOut[0]}, ${cOut[1]}, ${cOut[2]})`;
+        rgbResult.innerHTML = `<span>Final RGB</span><strong>${cOut[0]}, ${cOut[1]}, ${cOut[2]}</strong>`;
+
+        // Update Math Breakdown Grid
+        mathBreakdown.innerHTML = `
+            <div class="math-col">
+                <strong>Foreground Part</strong>
+                <span>R: ${fOut[0]}</span>
+                <span>G: ${fOut[1]}</span>
+                <span>B: ${fOut[2]}</span>
+            </div>
+            <div class="math-sign">+</div>
+            <div class="math-col">
+                <strong>Background Part</strong>
+                <span>R: ${bOut[0]}</span>
+                <span>G: ${bOut[1]}</span>
+                <span>B: ${bOut[2]}</span>
+            </div>
+            <div class="math-sign">=</div>
+            <div class="math-col highlight-blue">
+                <strong>Final Output (C)</strong>
+                <span>R: ${cOut[0]}</span>
+                <span>G: ${cOut[1]}</span>
+                <span>B: ${cOut[2]}</span>
+            </div>
+        `;
+
+        // Update Explanatory Text based on current Alpha
+        if (alpha === 1.0) {
+            expTitle.innerHTML = `Alpha = <span class="highlight">1.0</span> (Solid Foreground)`;
+            expText.innerText = `Because the alpha is 1.0, we take 100% of the Foreground color and 0% of the Background color. The final pixel is exactly the same as the raw subject color.`;
+        } else if (alpha === 0.0) {
+            expTitle.innerHTML = `Alpha = <span class="highlight">0.0</span> (Invisible Foreground)`;
+            expText.innerText = `Because the alpha is 0.0, we take 0% of the Foreground color and 100% of the Background color. The final pixel is exactly the same as the raw virtual background.`;
+        } else if (alpha === 0.5) {
+            expTitle.innerHTML = `Strand of Hair Example (Alpha = <span class="highlight">0.5</span>)`;
+            expText.innerText = `The math perfectly mixes 50% of the Foreground color with 50% of the Background color. This precise addition of light energy creates a perfectly soft, realistic anti-aliased edge.`;
+        } else {
+            const fgPercentage = Math.round(alpha * 100);
+            const bgPercentage = Math.round(invAlpha * 100);
+            expTitle.innerHTML = `Alpha = <span class="highlight">${alpha.toFixed(2)}</span> (${fgPercentage}% / ${bgPercentage}% Mix)`;
+            expText.innerText = `The equation adds ${fgPercentage}% of the Foreground's light energy together with exactly ${bgPercentage}% of the Background's light energy. By ensuring the percentages always sum to 100%, the image never blows out to white or crushes to black.`;
+        }
+    }
+
+    colorF_input.addEventListener('input', updateVisuals);
+    colorB_input.addEventListener('input', updateVisuals);
+    alphaSlider.addEventListener('input', updateVisuals);
+
+    // Initial render
+    updateVisuals();
+</script>
+
+</body>
+</html>
