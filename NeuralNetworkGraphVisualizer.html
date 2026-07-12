@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neural Network Graph & TensorRT Fusion</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f5f7;
+            padding: 20px;
+            color: #333;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+        .header { text-align: center; }
+        .header h2 { margin: 0 0 5px 0; color: #172b4d; }
+        .header p { margin: 0; color: #5e6c84; font-size: 0.95em; }
+
+        .pipeline-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 30px 20px;
+            background: #fafbfc;
+            border: 1px solid #dfe1e6;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .vram-block {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 80px;
+            height: 120px;
+            background: #e6fcff;
+            border: 2px dashed #00b8d9;
+            border-radius: 8px;
+            font-weight: bold;
+            color: #0065ff;
+            text-align: center;
+            font-size: 0.9em;
+            z-index: 2;
+        }
+
+        /* The Operation Nodes */
+        .compute-zone {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 15px;
+            border-radius: 12px;
+            border: 2px solid transparent;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            z-index: 2;
+        }
+
+        .node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 110px;
+            height: 80px;
+            background: white;
+            border: 2px solid #dfe1e6;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            font-weight: 600;
+            color: #172b4d;
+            text-align: center;
+            font-size: 0.9em;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .node .math {
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.85em;
+            color: #5e6c84;
+            margin-top: 5px;
+            font-weight: normal;
+        }
+
+        .arrow-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            width: 40px;
+        }
+        .arrow-line {
+            width: 100%;
+            height: 4px;
+            background: #c1c7d0;
+            position: relative;
+            transition: background 0.3s;
+        }
+        .arrow-head {
+            position: absolute;
+            right: -2px;
+            top: -4px;
+            width: 0; 
+            height: 0; 
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 8px solid #c1c7d0;
+            transition: border-left-color 0.3s;
+        }
+        .vram-label {
+            position: absolute;
+            top: -20px;
+            font-size: 0.7em;
+            color: #ff5630;
+            font-weight: bold;
+            white-space: nowrap;
+            opacity: 1;
+            transition: opacity 0.3s;
+        }
+
+        /* Highlight States */
+        .node.active {
+            border-color: #0052cc;
+            background: #e6effc;
+            box-shadow: 0 4px 8px rgba(0, 82, 204, 0.2);
+            transform: scale(1.05);
+        }
+        .arrow-line.active { background: #0052cc; }
+        .arrow-line.active .arrow-head { border-left-color: #0052cc; }
+
+        .compute-zone.fused {
+            background: rgba(54, 179, 126, 0.1);
+            border: 2px dashed #36b37e;
+            gap: 5px; /* Snap them together */
+        }
+        .compute-zone.fused .node {
+            border-color: #36b37e;
+            box-shadow: none;
+            height: 70px;
+        }
+        .compute-zone.fused .arrow-container {
+            width: 15px; /* Shrink inner arrows */
+        }
+        .compute-zone.fused .vram-label {
+            opacity: 0; /* Hide internal VRAM read/writes */
+        }
+        .fusion-title {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.85em;
+            font-weight: bold;
+            color: #36b37e;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .compute-zone.fused .fusion-title { opacity: 1; }
+
+        .data-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 10px;
+        }
+        .tensor {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            background: #dfe1e6;
+            padding: 4px;
+            border-radius: 8px;
+            position: relative;
+        }
+        .tensor::before {
+            content: 'Active Tensor Data';
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8em;
+            color: #5e6c84;
+            white-space: nowrap;
+        }
+        .tensor-cell {
+            width: 60px;
+            height: 60px;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 1.5em;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.3s;
+        }
+        /* Color coding negative/positive */
+        .cell-neg { color: #ff5630; }
+        .cell-pos { color: #36b37e; }
+        .cell-zero { color: #b3bac5; }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1em;
+        }
+        .btn-primary { background: #0052cc; color: white; }
+        .btn-primary:hover { background: #0047b3; }
+        .btn-primary:disabled { background: #b3bac5; cursor: not-allowed; }
+        
+        .btn-fusion {
+            background: white;
+            color: #36b37e;
+            border: 2px solid #36b37e;
+        }
+        .btn-fusion:hover { background: #eafff5; }
+        .btn-fusion.active {
+            background: #36b37e;
+            color: white;
+        }
+
+        .explanation {
+            background: #e6fcff;
+            border-left: 4px solid #0052cc;
+            padding: 16px;
+            border-radius: 4px;
+            min-height: 60px;
+        }
+        .explanation.trt-active {
+            background: #eafff5;
+            border-left-color: #36b37e;
+        }
+        .explanation p { margin: 0; font-size: 0.95em; line-height: 1.5; color: #172b4d; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>Neural Network Operation Graph</h2>
+        <p>Visualizing the mathematical sequence and TensorRT's Vertical Fusion</p>
+    </div>
+
+    <div class="pipeline-container">
+        <!-- Input Memory -->
+        <div class="vram-block">GPU<br>VRAM<br>(Read)</div>
+
+        <!-- External Arrow -->
+        <div class="arrow-container">
+            <div class="arrow-line" id="arr-in"><div class="arrow-head"></div></div>
+        </div>
+
+        <!-- The Compute Sequence -->
+        <div class="compute-zone" id="computeZone">
+            <div class="fusion-title">Single Custom CUDA Kernel (Fused)</div>
+            
+            <div class="node" id="node-conv">
+                Convolution
+                <div class="math">x * 2</div>
+            </div>
+
+            <div class="arrow-container inner-arrow">
+                <span class="vram-label">Write/Read VRAM</span>
+                <div class="arrow-line" id="arr-mid1"><div class="arrow-head"></div></div>
+            </div>
+
+            <div class="node" id="node-bias">
+                Add Bias
+                <div class="math">+ (-3)</div>
+            </div>
+
+            <div class="arrow-container inner-arrow">
+                <span class="vram-label">Write/Read VRAM</span>
+                <div class="arrow-line" id="arr-mid2"><div class="arrow-head"></div></div>
+            </div>
+
+            <div class="node" id="node-relu">
+                ReLU
+                <div class="math">max(0, x)</div>
+            </div>
+        </div>
+
+        <!-- External Arrow -->
+        <div class="arrow-container">
+            <div class="arrow-line" id="arr-out"><div class="arrow-head"></div></div>
+        </div>
+
+        <!-- Output Memory -->
+        <div class="vram-block">GPU<br>VRAM<br>(Write)</div>
+    </div>
+
+    <!-- Active Data Display -->
+    <div class="data-display">
+        <div class="tensor" id="tensorGrid">
+            <div class="tensor-cell" id="c0"></div>
+            <div class="tensor-cell" id="c1"></div>
+            <div class="tensor-cell" id="c2"></div>
+            <div class="tensor-cell" id="c3"></div>
+        </div>
+    </div>
+
+    <!-- Explanation Box -->
+    <div class="explanation" id="expBox">
+        <p id="expText"><strong>Step 0: Input Tensor.</strong> The GPU reads the initial $2 \times 2$ matrix of data from its global VRAM memory to begin processing.</p>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+        <button class="btn-primary" id="btnStep">Step Forward</button>
+        <button class="btn-primary" id="btnReset" style="background: #5e6c84;">Reset</button>
+        <button class="btn-fusion" id="btnFusion">Toggle TensorRT Fusion</button>
+    </div>
+</div>
+
+<script>
+    // Math States for the 2x2 Tensor
+    const mathStates = [
+        [  1, -2,  3, -1 ], // 0: Input
+        [  2, -4,  6, -2 ], // 1: Conv (Multiply by 2)
+        [ -1, -7,  3, -5 ], // 2: Add Bias (Subtract 3)
+        [  0,  0,  3,  0 ]  // 3: ReLU (max(0, x))
+    ];
+
+    // Text explanations for Standard execution
+    const standardExplanations = [
+        "<strong>Step 0: Input.</strong> The GPU reads the initial data from its slow global VRAM.",
+        "<strong>Step 1: Convolution.</strong> A standard PyTorch kernel multiplies the data by the learned weights (simplified as *2). It then writes this intermediate result back to VRAM.",
+        "<strong>Step 2: Add Bias.</strong> A brand new CUDA kernel is launched. It reads the data back out of VRAM, adds the Bias (-3), and writes it back to VRAM again.",
+        "<strong>Step 3: ReLU Activation.</strong> A third kernel reads from VRAM, runs the ReLU math (turning negatives to 0 to introduce non-linearity), and writes the final output to VRAM."
+    ];
+
+    let currentStep = 0;
+    let isFused = false;
+
+    // DOM Elements
+    const cells = [
+        document.getElementById('c0'), document.getElementById('c1'),
+        document.getElementById('c2'), document.getElementById('c3')
+    ];
+    const nodes = [null, document.getElementById('node-conv'), document.getElementById('node-bias'), document.getElementById('node-relu')];
+    const arrows = [
+        document.getElementById('arr-in'), document.getElementById('arr-mid1'),
+        document.getElementById('arr-mid2'), document.getElementById('arr-out')
+    ];
+    
+    const btnStep = document.getElementById('btnStep');
+    const btnReset = document.getElementById('btnReset');
+    const btnFusion = document.getElementById('btnFusion');
+    const expBox = document.getElementById('expBox');
+    const expText = document.getElementById('expText');
+    const computeZone = document.getElementById('computeZone');
+
+    // Update the visual colors of the numbers
+    function updateTensorVisuals(data) {
+        data.forEach((val, i) => {
+            cells[i].innerText = val;
+            cells[i].className = 'tensor-cell'; // reset
+            if (val < 0) cells[i].classList.add('cell-neg');
+            else if (val > 0) cells[i].classList.add('cell-pos');
+            else cells[i].classList.add('cell-zero');
+        });
+    }
+
+    // Highlight the graph nodes
+    function updateGraphHighlights(step) {
+        // Clear all
+        nodes.forEach(n => n && n.classList.remove('active'));
+        arrows.forEach(a => a.classList.remove('active'));
+
+        if (!isFused) {
+            // Standard sequential highlighting
+            if (step > 0) nodes[step].classList.add('active');
+            if (step === 0) arrows[0].classList.add('active');
+            if (step === 1) { arrows[0].classList.add('active'); arrows[1].classList.add('active'); }
+            if (step === 2) { arrows[1].classList.add('active'); arrows[2].classList.add('active'); }
+            if (step === 3) { arrows[2].classList.add('active'); arrows[3].classList.add('active'); }
+        } else {
+            // TensorRT Fused Highlighting
+            if (step > 0 && step < 4) {
+                // Highlight the whole zone together
+                nodes[1].classList.add('active');
+                nodes[2].classList.add('active');
+                nodes[3].classList.add('active');
+                arrows[0].classList.add('active');
+                arrows[3].classList.add('active'); // Out arrow active
+            }
+        }
+    }
+
+    // Set a specific step
+    function renderStep(step) {
+        updateTensorVisuals(mathStates[step]);
+        updateGraphHighlights(step);
+
+        if (isFused) {
+            if (step === 0) {
+                expText.innerHTML = "<strong>TensorRT Mode:</strong> Ready to execute. Data is in VRAM.";
+            } else if (step === 3) {
+                expText.innerHTML = "<strong>TensorRT Fused Execution Complete!</strong> The GPU read the data <strong>once</strong>, performed the Convolution, Bias, and ReLU sequentially in its ultra-fast private registers, and wrote it back to VRAM <strong>once</strong>. Massive bandwidth saved!";
+            } else {
+                expText.innerHTML = `<strong>Processing Step ${step}...</strong> (Happening internally inside the single fused CUDA kernel without touching VRAM).`;
+            }
+        } else {
+            expText.innerHTML = standardExplanations[step];
+        }
+
+        btnStep.disabled = (step === 3);
+    }
+
+    // Event Listeners
+    btnStep.addEventListener('click', () => {
+        if (currentStep < 3) {
+            currentStep++;
+            renderStep(currentStep);
+        }
+    });
+
+    btnReset.addEventListener('click', () => {
+        currentStep = 0;
+        renderStep(currentStep);
+    });
+
+    btnFusion.addEventListener('click', () => {
+        isFused = !isFused;
+        btnFusion.classList.toggle('active', isFused);
+        computeZone.classList.toggle('fused', isFused);
+        expBox.classList.toggle('trt-active', isFused);
+        
+        btnFusion.innerText = isFused ? "TensorRT Fusion: ON" : "Toggle TensorRT Fusion";
+        
+        // Re-render current state with new visual rules
+        renderStep(currentStep);
+    });
+
+    // Initial render
+    renderStep(0);
+
+</script>
+</body>
+</html>
