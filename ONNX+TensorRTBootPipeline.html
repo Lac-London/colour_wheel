@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ ONNX/TensorRT Boot Pipeline</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f4f5f7;
+            padding: 20px;
+            color: #333;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+        .header { text-align: center; }
+        .header h2 { margin: 0 0 5px 0; color: #172b4d; }
+        .header p { margin: 0; color: #5e6c84; font-size: 0.95em; }
+
+        .pipeline-graph {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #fafbfc;
+            border: 1px solid #dfe1e6;
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+        }
+        
+        .stage-row {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 15px;
+            opacity: 0.4;
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            transform: translateX(-10px);
+        }
+
+        .stage-row.active {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 20px;
+            background: white;
+            border: 2px solid #c1c7d0;
+            border-radius: 8px;
+            font-weight: bold;
+            color: #172b4d;
+            min-width: 180px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+            position: relative;
+            z-index: 2;
+        }
+
+        .node small {
+            font-weight: normal;
+            color: #5e6c84;
+            font-size: 0.8em;
+            margin-top: 4px;
+        }
+
+        .stage-row.active .node {
+            border-color: #0052cc;
+            box-shadow: 0 4px 8px rgba(0, 82, 204, 0.2);
+        }
+
+        .stage-row.done .node {
+            border-color: #36b37e;
+            background: #eafff5;
+        }
+
+        .trt-builder {
+            border-color: #ff991f !important;
+            background: #fff8f2;
+        }
+        .stage-row.active .trt-builder {
+            box-shadow: 0 4px 12px rgba(255, 153, 31, 0.3);
+            animation: pulse-orange 2s infinite;
+        }
+        
+        @keyframes pulse-orange {
+            0% { box-shadow: 0 0 0 0 rgba(255, 153, 31, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 153, 31, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 153, 31, 0); }
+        }
+
+        .engine-file {
+            background: #172b4d;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 6px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .engine-file.visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .terminal {
+            background: #091e42;
+            color: #36b37e;
+            font-family: "Courier New", Courier, monospace;
+            padding: 15px;
+            border-radius: 8px;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 0.85em;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .terminal-line { margin: 0; }
+        .terminal-line.info { color: #00b8d9; }
+        .terminal-line.warn { color: #ffab00; }
+        .terminal-line.error { color: #ff5630; }
+        
+        .performance-dashboard {
+            display: flex;
+            justify-content: space-around;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .gauge-card {
+            background: #fafbfc;
+            border: 1px solid #dfe1e6;
+            border-radius: 8px;
+            padding: 15px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .gauge-title { font-size: 0.8em; font-weight: bold; color: #5e6c84; text-transform: uppercase; margin-bottom: 5px; }
+        .gauge-value { font-size: 2em; font-weight: bold; color: #172b4d; font-family: "Courier New", Courier, monospace; transition: color 0.3s;}
+        .gauge-card.active { border-color: #36b37e; background: #eafff5; box-shadow: 0 4px 8px rgba(54, 179, 126, 0.2); }
+        .gauge-card.active .gauge-value { color: #36b37e; }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1em;
+            background: #0052cc;
+            color: white;
+            box-shadow: 0 3px 0 #003e99;
+        }
+        button:hover:not(:disabled) { transform: translateY(1px); box-shadow: 0 2px 0 #003e99; }
+        button:active:not(:disabled) { transform: translateY(3px); box-shadow: none; }
+        button:disabled { background: #b3bac5; box-shadow: 0 3px 0 #8993a4; cursor: not-allowed; }
+
+        /* Helpers */
+        .arrow { font-size: 1.5em; color: #c1c7d0; font-weight: bold; }
+        .stage-row.active .arrow { color: #0052cc; }
+        .stage-row.done .arrow { color: #36b37e; }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h2>TensorRT Boot & Execution Sequence</h2>
+        <p>Visualizing the C++ app startup phase vs. the real-time execution phase.</p>
+    </div>
+
+    <div class="pipeline-graph" id="pipelineGraph">
+        <!-- Step 1 -->
+        <div class="stage-row" id="stage1">
+            <div class="node">
+                C++ Application
+                <small>Boots up</small>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node" style="background:#e6effc; border-color:#0052cc;">
+                rvm.onnx
+                <small>Generic Model Loaded</small>
+            </div>
+        </div>
+
+        <!-- Step 2 & 3 -->
+        <div class="stage-row" id="stage2">
+            <div class="node">
+                ONNX Runtime
+                <small>Session Options Configured</small>
+            </div>
+            <div class="arrow">→</div>
+            <div class="node" style="border-color:#ff5630; color:#ff5630;">
+                Provider Flag
+                <small>"Use TensorRT"</small>
+            </div>
+        </div>
+
+        <!-- Step 4: The Heavy Lifting -->
+        <div class="stage-row" id="stage3">
+            <div class="node trt-builder">
+                TensorRT Compiler
+                <small id="trtStatus">Waiting for model...</small>
+            </div>
+            <div class="arrow">→</div>
+            <div class="engine-file" id="engineFile">
+                ⚙️ rvm_A100_fp16.engine
+            </div>
+        </div>
+
+        <!-- Step 5: Execution -->
+        <div class="stage-row" id="stage4">
+            <div class="node" style="background: #172b4d; color: white;">
+                GPU Execution
+                <small>Real-Time Video Pipeline</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="terminal" id="terminalLog">
+        <div class="terminal-line info">> App Initialized. Waiting to boot.</div>
+    </div>
+
+    <div class="performance-dashboard">
+        <div class="gauge-card" id="gaugePyTorch">
+            <div class="gauge-title">PyTorch (Python)</div>
+            <div class="gauge-value">~14 FPS</div>
+        </div>
+        <div class="gauge-card" id="gaugeOnnx">
+            <div class="gauge-title">Standard ONNX (C++)</div>
+            <div class="gauge-value">~28 FPS</div>
+        </div>
+        <div class="gauge-card" id="gaugeTrt">
+            <div class="gauge-title">ONNX + TensorRT</div>
+            <div class="gauge-value" id="trtFps">0 FPS</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="btnBoot">Boot C++ Application</button>
+    </div>
+</div>
+
+<script>
+    const btnBoot = document.getElementById('btnBoot');
+    const terminal = document.getElementById('terminalLog');
+    const trtStatus = document.getElementById('trtStatus');
+    const engineFile = document.getElementById('engineFile');
+    const gaugeTrt = document.getElementById('gaugeTrt');
+    const trtFps = document.getElementById('trtFps');
+
+    const stages = [
+        document.getElementById('stage1'),
+        document.getElementById('stage2'),
+        document.getElementById('stage3'),
+        document.getElementById('stage4')
+    ];
+
+    // Helper: Sleep function for pacing animations
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Helper: Add log line to terminal
+    function log(message, type = '') {
+        const line = document.createElement('div');
+        line.className = `terminal-line ${type}`;
+        line.innerText = `> ${message}`;
+        terminal.appendChild(line);
+        terminal.scrollTop = terminal.scrollHeight; // Auto-scroll
+    }
+
+    // Reset UI for replay
+    function resetUI() {
+        terminal.innerHTML = '<div class="terminal-line info">> App Initialized. Waiting to boot.</div>';
+        stages.forEach(s => {
+            s.classList.remove('active');
+            s.classList.remove('done');
+        });
+        trtStatus.innerText = "Waiting for model...";
+        engineFile.classList.remove('visible');
+        gaugeTrt.classList.remove('active');
+        trtFps.innerText = "0 FPS";
+    }
+
+    async function bootPipeline() {
+        btnBoot.disabled = true;
+        resetUI();
+
+        // ---------------------------------------------------------
+        // STEP 1: App Loads ONNX
+        // ---------------------------------------------------------
+        stages[0].classList.add('active');
+        log("int main() { ... }");
+        log("Loading standard generic rvm.onnx into memory...");
+        await sleep(1200);
+        stages[0].classList.replace('active', 'done');
+
+        // ---------------------------------------------------------
+        // STEP 2: Configure ONNX Runtime
+        // ---------------------------------------------------------
+        stages[1].classList.add('active');
+        log("Initializing ONNX Runtime Session...", "info");
+        log("Ort::SessionOptions options;");
+        log("OrtTensorRTProviderOptions trt_options;");
+        log("options.AppendExecutionProvider_TensorRT(trt_options);", "warn");
+        await sleep(1500);
+        stages[1].classList.replace('active', 'done');
+
+        // ---------------------------------------------------------
+        // STEP 3 & 4: Hand off to TensorRT & Profile
+        // ---------------------------------------------------------
+        stages[2].classList.add('active');
+        log("WARNING: No cached engine found. Triggering TensorRT Builder.", "warn");
+        log("This will take 10-60 seconds in reality. Profiling physical GPU...", "warn");
+        
+        trtStatus.innerText = "Profiling GPU Architecture...";
+        await sleep(1000);
+        
+        log("Applying Layer Fusion (Vertical Fusion)...", "info");
+        trtStatus.innerText = "Fusing Conv + Bias + ReLU...";
+        await sleep(1200);
+
+        log("Calibrating Precision...", "info");
+        trtStatus.innerText = "Quantizing FP32 -> FP16...";
+        await sleep(1200);
+
+        log("Auto-Tuning CUDA Kernels for optimal layout...", "info");
+        trtStatus.innerText = "Baking Engine File...";
+        await sleep(1500);
+
+        log("SUCCESS: Engine compiled and serialized.", "info");
+        trtStatus.innerText = "Compilation Complete.";
+        engineFile.classList.add('visible'); // Show the engine file
+        await sleep(1000);
+        stages[2].classList.replace('active', 'done');
+
+        // ---------------------------------------------------------
+        // STEP 5: Execution Phase
+        // ---------------------------------------------------------
+        stages[3].classList.add('active');
+        log("Boot sequence complete. Entering real-time while loop.");
+        log("Processing video frames...", "info");
+        gaugeTrt.classList.add('active');
+        
+        // Animate the FPS counter up to 60+
+        let currentFps = 0;
+        const targetFps = 84; // Typical jump for TRT FP16
+        const fpsInterval = setInterval(() => {
+            currentFps += Math.floor(Math.random() * 5) + 2;
+            if (currentFps >= targetFps) {
+                currentFps = targetFps;
+                clearInterval(fpsInterval);
+                log("Stable inference achieved. Pipeline running smoothly.", "info");
+                stages[3].classList.replace('active', 'done');
+                btnBoot.innerText = "Reboot Application";
+                btnBoot.disabled = false;
+            }
+            trtFps.innerText = `${currentFps} FPS`;
+        }, 50);
+    }
+
+    btnBoot.addEventListener('click', bootPipeline);
+
+</script>
+</body>
+</html>
