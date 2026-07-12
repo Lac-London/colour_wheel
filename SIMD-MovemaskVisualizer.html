@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMD Movemask Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    gridTemplateColumns: {
+                        '32': 'repeat(32, minmax(0, 1fr))'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+
+        .code-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .byte-cell {
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .byte-ff {
+            background-color: rgba(34, 197, 94, 0.2);
+            border-color: #22c55e;
+            color: #4ade80;
+            box-shadow: inset 0 0 8px rgba(34, 197, 94, 0.2);
+        }
+
+        .byte-00 {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: #7f1d1d;
+            color: #f87171;
+            opacity: 0.6;
+        }
+
+        .bit-cell {
+            background-color: #1e293b;
+            border-color: #334155;
+            color: #94a3b8;
+            transition: all 0.3s ease;
+        }
+
+        .bit-1 {
+            background-color: #22c55e;
+            border-color: #16a34a;
+            color: #fff;
+            box-shadow: 0 0 10px rgba(34, 197, 94, 0.6);
+        }
+
+        .bit-0 {
+            background-color: #ef4444;
+            border-color: #dc2626;
+            color: #fff;
+            opacity: 0.8;
+        }
+
+        /* Animation for bits falling down */
+        @keyframes dropBit {
+            0% { transform: translateY(-40px); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+
+        .dropping {
+            animation: dropBit 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
+
+        .code-active {
+            background-color: rgba(56, 189, 248, 0.15) !important;
+            border-color: #38bdf8 !important;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.1) !important;
+        }
+
+        .branch-active {
+            background-color: rgba(16, 185, 129, 0.2) !important;
+            border-color: #10b981 !important;
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.3) !important;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6">
+
+    <div class="max-w-[1500px] w-full bg-slate-800 rounded-xl shadow-2xl overflow-hidden border border-slate-700 flex flex-col">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+            <div>
+                <h2 class="text-xl font-bold text-sky-400">SIMD movemask & Control Flow</h2>
+                <p class="text-sm text-slate-400">Visualizing <code>_mm256_movemask_epi8</code> and Branching</p>
+            </div>
+            <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-purple-400 border border-slate-700 hidden sm:block">
+                Vector to Scalar Bridge
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row h-auto lg:min-h-[750px]">
+            
+            <!-- Code Panel -->
+            <div class="lg:w-5/12 bg-slate-950 p-5 flex flex-col border-r border-slate-700 overflow-y-auto">
+                <div class="flex items-center gap-2 mb-4">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-xs text-slate-500 code-font ml-2">fast_reject.cpp</span>
+                </div>
+                
+                <div class="w-full flex-grow overflow-x-auto mb-4 text-[13px] sm:text-sm">
+                    <pre class="code-font leading-relaxed text-slate-300 space-y-1">
+<span class="text-slate-500">// 5. Pack the 32 bytes into a 32-bit integer</span>
+<div id="code-movemask" class="px-2 py-1 -mx-2 rounded border border-transparent transition-colors duration-300"><span class="text-purple-400">uint32_t</span> bitmask = <span class="text-blue-400">_mm256_movemask_epi8</span>(
+    final_mask
+);</div>
+
+<span class="text-slate-500">// 6. The "Fast Reject" Logic</span>
+<div id="code-branch-ff" class="px-2 py-1 -mx-2 rounded border border-transparent transition-all duration-300"><span class="text-pink-400">if</span> (bitmask == <span class="text-orange-400">0xFFFFFFFF</span>) {
+    <span class="text-slate-500">// ALL 32 pixels are pure green.</span>
+    <span class="text-slate-500">// Skip Neural Network!</span>
+    <span class="text-sky-300">Hardcode_Alpha</span>(<span class="text-emerald-400">0.0f</span>);</div><div id="code-branch-00" class="px-2 py-1 -mx-2 rounded border border-transparent transition-all duration-300">} <span class="text-pink-400">else if</span> (bitmask == <span class="text-orange-400">0x00000000</span>) {
+    <span class="text-slate-500">// NONE are green (e.g. solid person).</span>
+    <span class="text-slate-500">// Skip Neural Network!</span>
+    <span class="text-sky-300">Hardcode_Alpha</span>(<span class="text-emerald-400">1.0f</span>);</div><div id="code-branch-mixed" class="px-2 py-1 -mx-2 rounded border border-transparent transition-all duration-300">} <span class="text-pink-400">else</span> {
+    <span class="text-slate-500">// Mixed 1s and 0s. This is an EDGE.</span>
+    <span class="text-slate-500">// MUST send to TensorRT!</span>
+    <span class="text-sky-300">Evaluate_With_Neural_Network</span>();
+}</div></pre>
+                </div>
+
+                <!-- Explanation Box -->
+                <div id="explanation-box" class="mt-auto bg-slate-800 p-4 rounded-lg border border-sky-900/50 text-sm text-slate-300 shadow-inner">
+                    Select a scenario on the right and click <strong>Execute</strong>.
+                </div>
+            </div>
+
+            <!-- Hardware Visualizer Panel -->
+            <div class="lg:w-7/12 p-4 sm:p-6 bg-slate-900 flex flex-col relative overflow-y-auto overflow-x-hidden">
+                
+                <!-- Scenario Controls -->
+                <div class="flex flex-wrap justify-center gap-2 mb-8 bg-slate-800 p-2 rounded-lg border border-slate-700 w-max mx-auto">
+                    <button class="scenario-btn px-4 py-2 text-sm font-semibold rounded bg-sky-600 text-white" data-type="mixed">Mixed Edge</button>
+                    <button class="scenario-btn px-4 py-2 text-sm font-semibold rounded text-slate-400 hover:bg-slate-700" data-type="all">All Green (0xFF)</button>
+                    <button class="scenario-btn px-4 py-2 text-sm font-semibold rounded text-slate-400 hover:bg-slate-700" data-type="none">No Green (0x00)</button>
+                </div>
+
+                <!-- Source Vector (final_mask) -->
+                <div class="w-full mb-2">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-emerald-400 text-sm flex items-center gap-2">
+                            <span class="code-font">final_mask</span> (256-bit Vector)
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">32 Bytes</span>
+                    </div>
+                    
+                    <div class="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                        <div class="grid grid-cols-32 gap-[2px] min-w-[600px] sm:min-w-0" id="reg-final-mask">
+                            <!-- 32 bytes injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Extractor Visualization -->
+                <div class="w-full flex justify-center py-6 my-2 relative">
+                    <div class="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+                        <svg width="100%" height="100%" preserveAspectRatio="none">
+                            <!-- SVG lines will be drawn here to show packing -->
+                            <path d="M 0,0 L 50%,100% M 100%,0 L 50%,100%" stroke="white" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"></path>
+                        </svg>
+                    </div>
+                    <button id="btn-execute" class="relative z-10 px-8 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-bold transition-all shadow-[0_0_20px_rgba(147,51,234,0.4)] border border-purple-400 flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                        Execute _mm256_movemask_epi8
+                    </button>
+                </div>
+
+                <!-- Packed 32-bit Integer Result -->
+                <div class="w-full mt-4">
+                    <div class="flex justify-between items-end mb-2">
+                        <h3 class="font-bold text-orange-400 text-sm flex items-center gap-2">
+                            <span class="code-font">bitmask</span> (Scalar Integer)
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">32 Bits</span>
+                    </div>
+                    
+                    <div class="overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+                        <div class="bg-slate-950 border border-slate-700 rounded-lg p-3 min-w-[600px] sm:min-w-0">
+                            <!-- 32 individual bits -->
+                            <div class="grid grid-cols-32 gap-[1px]" id="reg-bitmask">
+                                <!-- 32 bits injected here -->
+                            </div>
+                            
+                            <!-- Hex Value Display -->
+                            <div class="mt-4 text-center">
+                                <span class="text-xs text-slate-500 uppercase tracking-widest block mb-1">Hexadecimal Value</span>
+                                <div class="code-font text-3xl font-bold text-white tracking-wider" id="hex-output">
+                                    0x????????
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const NUM_ELEMENTS = 32;
+
+        // Elements
+        const regFinalMask = document.getElementById('reg-final-mask');
+        const regBitmask = document.getElementById('reg-bitmask');
+        const hexOutput = document.getElementById('hex-output');
+        const btnExecute = document.getElementById('btn-execute');
+        const scenarioBtns = document.querySelectorAll('.scenario-btn');
+        const expBox = document.getElementById('explanation-box');
+
+        // Code block elements
+        const codeMovemask = document.getElementById('code-movemask');
+        const codeBranchFF = document.getElementById('code-branch-ff');
+        const codeBranch00 = document.getElementById('code-branch-00');
+        const codeBranchMixed = document.getElementById('code-branch-mixed');
+
+        // Data Arrays
+        let byteData = []; // 'FF' or '00'
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        function generateBytes(scenario) {
+            byteData = [];
+            for (let i = 0; i < NUM_ELEMENTS; i++) {
+                if (scenario === 'all') {
+                    byteData.push('FF');
+                } else if (scenario === 'none') {
+                    byteData.push('00');
+                } else {
+                    // Mixed: Randomly assign FF or 00. 
+                    // Bias it so we get a good mix visually.
+                    byteData.push(Math.random() > 0.5 ? 'FF' : '00');
+                }
+            }
+        }
+
+        function renderGrids() {
+            regFinalMask.innerHTML = '';
+            regBitmask.innerHTML = '';
+            hexOutput.innerHTML = '<span class="opacity-30">0x????????</span>';
+
+            for (let i = 0; i < NUM_ELEMENTS; i++) {
+                // Byte Cell (Source)
+                const bCell = document.createElement('div');
+                const isFF = byteData[i] === 'FF';
+                bCell.className = `byte-cell h-10 rounded-sm border flex flex-col items-center justify-center code-font text-[9px] sm:text-[10px] font-bold ${isFF ? 'byte-ff' : 'byte-00'}`;
+                
+                // Show binary representation to make MSB clear
+                bCell.innerHTML = `
+                    <span class="text-white text-[8px] opacity-80 mb-0.5 leading-none">${isFF ? '<u class="text-green-300 text-[10px]">1</u>111' : '<u class="text-red-300 text-[10px]">0</u>000'}</span>
+                    <span>${isFF ? 'FF' : '00'}</span>
+                `;
+                regFinalMask.appendChild(bCell);
+
+                // Bit Cell (Destination) - Empty initially
+                const bitCell = document.createElement('div');
+                bitCell.className = `bit-cell h-8 rounded-sm border flex items-center justify-center code-font text-[10px] font-bold opacity-0`;
+                bitCell.textContent = '?';
+                regBitmask.appendChild(bitCell);
+            }
+            
+            resetCodeHighlights();
+            btnExecute.disabled = false;
+        }
+
+        function resetCodeHighlights() {
+            codeMovemask.classList.remove('code-active');
+            codeBranchFF.classList.remove('branch-active');
+            codeBranch00.classList.remove('branch-active');
+            codeBranchMixed.classList.remove('branch-active');
+        }
+
+        // Scenario Selection
+        scenarioBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // Update UI Buttons
+                scenarioBtns.forEach(b => {
+                    b.classList.remove('bg-sky-600', 'text-white');
+                    b.classList.add('text-slate-400', 'hover:bg-slate-700');
+                });
+                e.target.classList.remove('text-slate-400', 'hover:bg-slate-700');
+                e.target.classList.add('bg-sky-600', 'text-white');
+
+                // Re-init
+                generateBytes(e.target.dataset.type);
+                renderGrids();
+                expBox.innerHTML = "Scenario loaded. Click <strong>Execute</strong>.";
+            });
+        });
+
+        // Convert 32-bit array to Hex string
+        function bitsToHex(bitArray) {
+            // bits are 1 or 0 integers
+            let hexStr = '0x';
+            // Process 4 bits (1 nibble) at a time to create a hex character
+            for(let i=0; i<32; i+=4) {
+                let nibble = (bitArray[i] << 3) | (bitArray[i+1] << 2) | (bitArray[i+2] << 1) | bitArray[i+3];
+                hexStr += nibble.toString(16).toUpperCase();
+            }
+            return hexStr;
+        }
+
+        async function executeMovemask() {
+            btnExecute.disabled = true;
+            resetCodeHighlights();
+            
+            // Highlight Movemask Line
+            codeMovemask.classList.add('code-active');
+            expBox.innerHTML = "<strong class='text-purple-400'>_mm256_movemask_epi8:</strong> Extracting the most significant bit (MSB) from every byte and packing them into a 32-bit integer.";
+
+            const bitCells = regBitmask.children;
+            let resultingBits = [];
+
+            // Animation: Extract and drop bits
+            for (let i = 0; i < NUM_ELEMENTS; i++) {
+                const bitVal = byteData[i] === 'FF' ? 1 : 0;
+                resultingBits.push(bitVal);
+
+                setTimeout(() => {
+                    bitCells[i].textContent = bitVal;
+                    bitCells[i].className = `bit-cell h-8 rounded-sm border flex items-center justify-center code-font text-[11px] font-bold dropping ${bitVal === 1 ? 'bit-1' : 'bit-0'}`;
+                }, i * 20); // Ripple effect
+            }
+
+            await sleep((NUM_ELEMENTS * 20) + 500); // Wait for ripple + animation
+
+            // Calculate and Show Hex
+            const hexValue = bitsToHex(resultingBits);
+            hexOutput.innerHTML = `<span class="${hexValue === '0xFFFFFFFF' ? 'text-emerald-400' : (hexValue === '0x00000000' ? 'text-red-400' : 'text-sky-400')}">${hexValue}</span>`;
+
+            await sleep(800);
+            
+            codeMovemask.classList.remove('code-active');
+            expBox.innerHTML = `<strong>Result Packed:</strong> <span class="code-font">${hexValue}</span><br>Now evaluating the Fast Reject control flow logic...`;
+
+            await sleep(800);
+
+            // Branch Logic
+            if (hexValue === '0xFFFFFFFF') {
+                codeBranchFF.classList.add('branch-active');
+                expBox.innerHTML = `<strong class='text-emerald-400'>All Green!</strong> Every single pixel passed. We can entirely skip the expensive Neural Network and hardcode the Alpha to 0.0 for this block.`;
+            } else if (hexValue === '0x00000000') {
+                codeBranch00.classList.add('branch-active');
+                expBox.innerHTML = `<strong class='text-red-400'>No Green!</strong> No pixels passed (this is likely the center of the person). Skip the Neural Network and hardcode the Alpha to 1.0.`;
+            } else {
+                codeBranchMixed.classList.add('branch-active');
+                expBox.innerHTML = `<strong class='text-sky-400'>Edge Detected!</strong> The block is a mix of green and non-green pixels. This chunk of the image MUST be passed to the TensorRT Neural Network to calculate the exact fractional alpha values of the hair/clothing edges.`;
+            }
+        }
+
+        // Bind Execute
+        btnExecute.addEventListener('click', executeMovemask);
+
+        // Initialize with 'mixed'
+        generateBytes('mixed');
+        renderGrids();
+    </script>
+</body>
+</html>
