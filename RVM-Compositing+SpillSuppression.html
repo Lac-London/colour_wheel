@@ -183,6 +183,37 @@
         <!-- Left Column: Math & Hover Data -->
         <div class="lg:w-5/12 flex flex-col gap-6">
             
+            <!-- NEW: Keying Parameters -->
+            <div class="bg-slate-950 p-5 rounded-lg border border-slate-700">
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3">Tuning Parameters</h3>
+                <p class="text-xs text-slate-400 mb-4 pb-4 border-b border-slate-800">
+                    Adjust the algorithmic parameters to see how the Alpha matte and Spill Suppression respond in real-time.
+                </p>
+                <div class="flex flex-col gap-4">
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>Green Threshold (Tolerance)</span>
+                            <span id="val-thresh" class="code-font text-sky-400">10</span>
+                        </div>
+                        <input type="range" id="slider-thresh" min="0" max="50" value="10" class="w-full accent-sky-500">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>Edge Softness</span>
+                            <span id="val-soft" class="code-font text-sky-400">40</span>
+                        </div>
+                        <input type="range" id="slider-soft" min="10" max="100" value="40" class="w-full accent-sky-500">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>Spill Suppression Strength</span>
+                            <span id="val-spill" class="code-font text-green-400">1.0</span>
+                        </div>
+                        <input type="range" id="slider-spill" min="0" max="1" step="0.05" value="1.0" class="w-full accent-green-500">
+                    </div>
+                </div>
+            </div>
+
             <div class="bg-slate-950 p-5 rounded-lg border border-slate-700">
                 <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex justify-between items-center">
                     <span>Live Pixel Evaluation</span>
@@ -328,9 +359,19 @@
     const labelFg = document.getElementById('label-fg');
     const modeIndicator = document.getElementById('mode-indicator');
 
+    // New Parameter Sliders
+    const sliderThresh = document.getElementById('slider-thresh');
+    const sliderSoft = document.getElementById('slider-soft');
+    const sliderSpill = document.getElementById('slider-spill');
+    const valThreshText = document.getElementById('val-thresh');
+    const valSoftText = document.getElementById('val-soft');
+    const valSpillText = document.getElementById('val-spill');
+
     // Data buffers to mimic CUDA memory
     let dataBg, dataAlpha, dataRaw, dataPure, dataOut;
+    let cachedPortraitData = null; // Cache raw pixels for fast slider updates
     let isReady = false;
+    let lastMouseX = 300, lastMouseY = 200; // Track mouse for live math updates
 
     function loadAssets() {
         let loadedImages = 0;
@@ -379,57 +420,59 @@
         const tempCtx = document.createElement('canvas').getContext('2d');
         tempCtx.canvas.width = WIDTH; tempCtx.canvas.height = HEIGHT;
         tempCtx.drawImage(imgPortrait, 0, 0, WIDTH, HEIGHT);
-        const portraitData = tempCtx.getImageData(0, 0, WIDTH, HEIGHT).data;
+        cachedPortraitData = tempCtx.getImageData(0, 0, WIDTH, HEIGHT).data;
 
         // Initialize buffers
         dataRaw = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
         dataPure = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-        
-        ctxAlpha.fillStyle = '#000';
-        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
-        dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
+        dataAlpha = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
 
-        // 2. Process Pixels: Extract Alpha and Suppress Spill
-        // Simulating the RVM Neural Network output
+        // Perform initial calculation
+        recalculateBuffers();
+        finishSetup();
+    }
+
+    function recalculateBuffers() {
+        if (!cachedPortraitData) return;
+
+        const thresh = parseFloat(sliderThresh.value);
+        const soft = parseFloat(sliderSoft.value);
+        const spill = parseFloat(sliderSpill.value);
+
+        // Update UI Labels
+        valThreshText.innerText = thresh;
+        valSoftText.innerText = soft;
+        valSpillText.innerText = spill.toFixed(2);
+
         for (let i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
-            const r = portraitData[i];
-            const g = portraitData[i+1];
-            const b = portraitData[i+2];
+            const r = cachedPortraitData[i];
+            const g = cachedPortraitData[i+1];
+            const b = cachedPortraitData[i+2];
 
-            // A basic Color Difference Keyer to extract alpha from the green background
-            // Max(R, B) represents the expected luma if it wasn't green
             const maxRB = Math.max(r, b);
-            
-            // Calculate how "green" the pixel is
             let greenDiff = g - maxRB;
             
-            // Normalize into an alpha matte (0.0 to 1.0)
-            // Adjusting thresholds based on this specific image's lighting
             let alpha = 1.0;
-            if (greenDiff > 10) {
-                // It's mostly green background
-                alpha = Math.max(0, 1.0 - (greenDiff / 40.0));
+            if (greenDiff > thresh) {
+                alpha = Math.max(0, 1.0 - ((greenDiff - thresh) / soft));
             }
             
-            // Save to Alpha Buffer
             const alphaInt = Math.round(alpha * 255);
             dataAlpha[i] = alphaInt;
             dataAlpha[i+1] = alphaInt;
             dataAlpha[i+2] = alphaInt;
             dataAlpha[i+3] = 255;
 
-            // Raw Input (I): Exactly what the camera saw. Contains heavy green spill on hair.
             dataRaw[i]   = r;
             dataRaw[i+1] = g;
             dataRaw[i+2] = b;
             dataRaw[i+3] = 255;
 
-            // Purified Foreground (F): The RVM network mathematically removes green spill.
-            // We simulate this by limiting the Green channel to never exceed the Red or Blue channel
-            // in areas where the alpha is semi-transparent (hair edges).
+            // Apply dynamic spill suppression based on the slider
             let pureG = g;
-            if (alpha < 0.95 && g > maxRB) {
-                pureG = maxRB; // Suppress the green bounce light
+            if (alpha < 1.0 && g > maxRB) {
+                pureG = g - ((g - maxRB) * spill); 
             }
 
             dataPure[i]   = r;
@@ -442,14 +485,22 @@
         ctxAlpha.putImageData(new ImageData(dataAlpha, WIDTH, HEIGHT), 0, 0);
         ctxRaw.putImageData(new ImageData(dataRaw, WIDTH, HEIGHT), 0, 0);
         ctxPure.putImageData(new ImageData(dataPure, WIDTH, HEIGHT), 0, 0);
-        
-        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
-        finishSetup();
+
+        // Re-run the compositor if it's already booted
+        if (isReady) {
+            runCompositingKernel(parseInt(wipeSlider.value));
+            updateMathDisplay(lastMouseX, lastMouseY);
+        }
     }
 
     function processProceduralBuffers() {
         console.warn("Images failed to load (CORS/Network). Falling back to procedural shapes.");
         
+        // Disable sliders since procedural mode is static
+        sliderThresh.disabled = true;
+        sliderSoft.disabled = true;
+        sliderSpill.disabled = true;
+
         // Background
         const gradBg = ctxBg.createLinearGradient(0, 0, WIDTH, HEIGHT);
         gradBg.addColorStop(0, '#1e1b4b'); gradBg.addColorStop(1, '#be123c');
@@ -603,6 +654,10 @@
         runCompositingKernel(parseInt(e.target.value));
     });
 
+    [sliderThresh, sliderSoft, sliderSpill].forEach(slider => {
+        slider.addEventListener('input', recalculateBuffers);
+    });
+
     mainContainer.addEventListener('mousemove', (e) => {
         const rect = renderCanvas.getBoundingClientRect();
         // Scale mouse coordinates to internal canvas resolution
@@ -612,6 +667,7 @@
         const x = Math.floor((e.clientX - rect.left) * scaleX);
         const y = Math.floor((e.clientY - rect.top) * scaleY);
         
+        lastMouseX = x; lastMouseY = y;
         updateMathDisplay(x, y);
     });
 
@@ -624,6 +680,7 @@
         const x = Math.floor((touch.clientX - rect.left) * scaleX);
         const y = Math.floor((touch.clientY - rect.top) * scaleY);
         
+        lastMouseX = x; lastMouseY = y;
         updateMathDisplay(x, y);
         e.preventDefault(); // Prevent scrolling while wiping
     }, {passive: false});
