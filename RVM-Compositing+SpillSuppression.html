@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RVM Compositing Engine & Spill Suppression</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        .panel {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            cursor: crosshair;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            border: 2px solid #475569;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* Custom Wipe Slider */
+        .wipe-slider-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 20;
+        }
+
+        .wipe-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            outline: none;
+            margin: 0;
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: ew-resize;
+        }
+
+        .wipe-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 4px;
+            height: 400px;
+            background: #fff;
+            cursor: ew-resize;
+            box-shadow: 0 0 10px rgba(0,0,0,0.8), 0 0 5px rgba(255,255,255,0.8);
+            position: relative;
+        }
+
+        .wipe-slider::-moz-range-thumb {
+            width: 4px;
+            height: 400px;
+            background: #fff;
+            cursor: ew-resize;
+            box-shadow: 0 0 10px rgba(0,0,0,0.8), 0 0 5px rgba(255,255,255,0.8);
+            border: none;
+            border-radius: 0;
+        }
+
+        /* Math Display Boxes */
+        .math-box {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            transition: all 0.2s;
+        }
+
+        .math-sign {
+            font-size: 24px;
+            font-weight: bold;
+            color: #64748b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .color-preview {
+            width: 100%;
+            height: 6px;
+            border-radius: 2px;
+            margin-top: 6px;
+            background: #000;
+        }
+
+        .asset-mini-canvas {
+            width: 100%;
+            aspect-ratio: 16/9;
+            border-radius: 6px;
+            border: 1px solid #475569;
+            background: #000;
+        }
+
+        .highlight-green { color: #22c55e; text-shadow: 0 0 8px rgba(34,197,94,0.5); }
+        .highlight-red { color: #ef4444; text-shadow: 0 0 8px rgba(239,68,68,0.5); }
+        .highlight-blue { color: #38bdf8; text-shadow: 0 0 8px rgba(56,189,248,0.5); }
+        .highlight-purple { color: #a855f7; text-shadow: 0 0 8px rgba(168,85,247,0.5); }
+
+        .active-rvm { border-color: #22c55e; box-shadow: 0 0 15px rgba(34, 197, 94, 0.2); }
+        .active-naive { border-color: #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.2); }
+
+    </style>
+</head>
+<body>
+
+<div class="max-w-[1200px] w-full panel flex flex-col overflow-hidden">
+    
+    <!-- Header -->
+    <div class="bg-slate-900 px-6 py-4 border-b border-slate-700 flex justify-between items-center shrink-0">
+        <div>
+            <h2 class="text-xl font-bold text-sky-400">CUDA Compositing & Spill Suppression</h2>
+            <p class="text-sm text-slate-400">Visualizing RVM's Purified Foreground ($F$) vs. the Original Image ($I$)</p>
+        </div>
+        <div class="code-font text-xs bg-slate-800 px-3 py-1 rounded text-emerald-400 border border-slate-700">
+            Real-Time Pixel Shader Math
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex flex-col lg:flex-row p-6 gap-6">
+        
+        <!-- Left Column: Math & Hover Data -->
+        <div class="lg:w-5/12 flex flex-col gap-6">
+            
+            <div class="bg-slate-950 p-5 rounded-lg border border-slate-700">
+                <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider mb-3 flex justify-between items-center">
+                    <span>Live Pixel Evaluation</span>
+                    <span class="text-xs text-slate-500 font-normal code-font" id="hover-coords">x: 0, y: 0</span>
+                </h3>
+                
+                <p class="text-xs text-slate-400 mb-4 pb-4 border-b border-slate-800">
+                    Hover over the "fuzzy hair" edges on the canvas to see how the Alpha mathematically blends the colors. Drag the slider to compare the equations.
+                </p>
+
+                <!-- Current Mode Indicator -->
+                <div id="mode-indicator" class="text-center font-bold text-lg mb-6 py-2 rounded code-font active-rvm highlight-green bg-green-900/20">
+                    RVM Method (Purified)
+                </div>
+
+                <!-- The Math Equation Blocks -->
+                <div class="flex flex-col gap-2">
+                    
+                    <div class="flex gap-2">
+                        <div class="math-box flex-1">
+                            <span class="text-[10px] text-slate-400 uppercase">Alpha (α)</span>
+                            <span class="code-font font-bold text-lg text-white" id="val-alpha">0.00</span>
+                        </div>
+                        <div class="math-sign">×</div>
+                        <div class="math-box flex-1" id="box-fg">
+                            <span class="text-[10px] text-slate-400 uppercase" id="label-fg">Foreground (F)</span>
+                            <span class="code-font font-bold text-sm text-white" id="val-fg">0, 0, 0</span>
+                            <div class="color-preview" id="color-fg"></div>
+                        </div>
+                    </div>
+
+                    <div class="math-sign">+</div>
+
+                    <div class="flex gap-2">
+                        <div class="math-box flex-1">
+                            <span class="text-[10px] text-slate-400 uppercase">Inverse (1 - α)</span>
+                            <span class="code-font font-bold text-lg text-slate-300" id="val-inv-alpha">1.00</span>
+                        </div>
+                        <div class="math-sign">×</div>
+                        <div class="math-box flex-1">
+                            <span class="text-[10px] text-slate-400 uppercase">Background (B)</span>
+                            <span class="code-font font-bold text-sm text-white" id="val-bg">0, 0, 0</span>
+                            <div class="color-preview" id="color-bg"></div>
+                        </div>
+                    </div>
+
+                    <div class="math-sign">=</div>
+
+                    <div class="math-box w-full border-sky-600 bg-sky-900/20 shadow-[0_0_15px_rgba(2,132,199,0.2)]">
+                        <span class="text-[10px] text-sky-400 uppercase font-bold">Final Composite Pixel (C)</span>
+                        <span class="code-font font-bold text-2xl text-white mt-1" id="val-out">0, 0, 0</span>
+                        <div class="color-preview h-3" id="color-out"></div>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Interactive Canvas -->
+        <div class="lg:w-7/12 flex flex-col">
+            
+            <div class="flex justify-between text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider px-2">
+                <span class="highlight-green">← Correct: RVM Purified (F)</span>
+                <span class="highlight-red">Mistake: Original Image (I) →</span>
+            </div>
+
+            <!-- Main Render Area -->
+            <div class="canvas-container" id="main-container">
+                <canvas id="renderCanvas" width="600" height="400"></canvas>
+                <div class="wipe-slider-container">
+                    <input type="range" min="0" max="600" value="300" class="wipe-slider" id="wipeSlider">
+                </div>
+            </div>
+
+            <!-- Ingredient Canvases (Generated Procedurally) -->
+            <div class="grid grid-cols-4 gap-4 mt-6">
+                <div>
+                    <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 text-center">New Background (B)</div>
+                    <canvas id="canBg" class="asset-mini-canvas"></canvas>
+                </div>
+                <div>
+                    <div class="text-[10px] text-slate-400 uppercase font-bold mb-1 text-center">Alpha Matte (α)</div>
+                    <canvas id="canAlpha" class="asset-mini-canvas"></canvas>
+                </div>
+                <div>
+                    <div class="text-[10px] text-green-400 uppercase font-bold mb-1 text-center">Original Input (I)</div>
+                    <canvas id="canRaw" class="asset-mini-canvas border-green-700 shadow-[0_0_8px_rgba(21,128,61,0.5)]"></canvas>
+                </div>
+                <div>
+                    <div class="text-[10px] text-sky-400 uppercase font-bold mb-1 text-center">Purified Fore (F)</div>
+                    <canvas id="canPure" class="asset-mini-canvas border-sky-700 shadow-[0_0_8px_rgba(2,132,199,0.5)]"></canvas>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    //    const WIDTH = 600;
+    const HEIGHT = 400;
+
+    // Main Canvas
+    const renderCanvas = document.getElementById('renderCanvas');
+    const renderCtx = renderCanvas.getContext('2d', { willReadFrequently: true });
+    
+    // Mini Canvases (Offscreen render targets)
+    const canBg = document.getElementById('canBg');
+    const canAlpha = document.getElementById('canAlpha');
+    const canRaw = document.getElementById('canRaw');
+    const canPure = document.getElementById('canPure');
+    
+    [canBg, canAlpha, canRaw, canPure].forEach(can => {
+        can.width = WIDTH;
+        can.height = HEIGHT;
+    });
+
+    const ctxBg = canBg.getContext('2d', { willReadFrequently: true });
+    const ctxAlpha = canAlpha.getContext('2d', { willReadFrequently: true });
+    const ctxRaw = canRaw.getContext('2d', { willReadFrequently: true });
+    const ctxPure = canPure.getContext('2d', { willReadFrequently: true });
+
+    // UI Elements
+    const wipeSlider = document.getElementById('wipeSlider');
+    const mainContainer = document.getElementById('main-container');
+    const hoverCoords = document.getElementById('hover-coords');
+    
+    const valAlpha = document.getElementById('val-alpha');
+    const valInvAlpha = document.getElementById('val-inv-alpha');
+    const valFg = document.getElementById('val-fg');
+    const valBg = document.getElementById('val-bg');
+    const valOut = document.getElementById('val-out');
+    
+    const colorFg = document.getElementById('color-fg');
+    const colorBg = document.getElementById('color-bg');
+    const colorOut = document.getElementById('color-out');
+    
+    const boxFg = document.getElementById('box-fg');
+    const labelFg = document.getElementById('label-fg');
+    const modeIndicator = document.getElementById('mode-indicator');
+
+    // Data buffers to mimic CUDA memory
+    let dataBg, dataAlpha, dataRaw, dataPure, dataOut;
+
+    //    function generateAssets() {
+        // 1. Generate New Background (B): A Sci-Fi Gradient
+        const gradBg = ctxBg.createLinearGradient(0, 0, WIDTH, HEIGHT);
+        gradBg.addColorStop(0, '#1e1b4b'); // Deep Blue/Purple
+        gradBg.addColorStop(0.5, '#4c1d95'); // Purple
+        gradBg.addColorStop(1, '#be123c'); // Pink/Red
+        ctxBg.fillStyle = gradBg;
+        ctxBg.fillRect(0, 0, WIDTH, HEIGHT);
+
+        // Subject Drawing Properties (A fuzzy sphere mimicking frizzy hair)
+        const cx = WIDTH / 2;
+        const cy = HEIGHT + 50;
+        const radius = 250;
+        const skinColor = '#d97757'; // Brownish/Orange skin tone
+
+        // 2. Generate Alpha Matte (α)
+        ctxAlpha.fillStyle = '#000000'; // Black background
+        ctxAlpha.fillRect(0, 0, WIDTH, HEIGHT);
+        ctxAlpha.beginPath();
+        ctxAlpha.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctxAlpha.shadowColor = '#ffffff';
+        ctxAlpha.shadowBlur = 80; // Massive blur to create semi-transparent edge
+        ctxAlpha.fillStyle = '#ffffff'; // White foreground
+        ctxAlpha.fill();
+        ctxAlpha.shadowBlur = 0; // Reset
+
+        // 3. Generate Original Input (I): Subject shot on a GREEN SCREEN
+        ctxRaw.fillStyle = '#00ff00'; // Pure Green Background
+        ctxRaw.fillRect(0, 0, WIDTH, HEIGHT);
+        ctxRaw.beginPath();
+        ctxRaw.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctxRaw.shadowColor = skinColor;
+        ctxRaw.shadowBlur = 80; // The blur mixes skin color with the green background = GREEN SPILL
+        ctxRaw.fillStyle = skinColor;
+        ctxRaw.fill();
+        ctxRaw.shadowBlur = 0;
+
+        // 4. Generate RVM Purified Foreground (F): Subject shot on a BLACK background
+        ctxPure.fillStyle = '#000000'; // Pure Black Background (No spill)
+        ctxPure.fillRect(0, 0, WIDTH, HEIGHT);
+        ctxPure.beginPath();
+        ctxPure.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctxPure.shadowColor = skinColor;
+        ctxPure.shadowBlur = 80; // The blur mixes skin color with black = Pure Foreground
+        ctxPure.fillStyle = skinColor;
+        ctxPure.fill();
+        ctxPure.shadowBlur = 0;
+
+        // Extract raw pixel arrays (mimicking VRAM buffers)
+        dataBg = ctxBg.getImageData(0, 0, WIDTH, HEIGHT).data;
+        dataAlpha = ctxAlpha.getImageData(0, 0, WIDTH, HEIGHT).data;
+        dataRaw = ctxRaw.getImageData(0, 0, WIDTH, HEIGHT).data;
+        dataPure = ctxPure.getImageData(0, 0, WIDTH, HEIGHT).data;
+        
+        // Create an empty buffer for the final output
+        dataOut = new Uint8ClampedArray(WIDTH * HEIGHT * 4);
+    }
+
+    //    function runCompositingKernel(sliderX) {
+        // This loop perfectly mimics the CUDA Kernel running the compositing equation
+        for (let i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
+            
+            // Calculate current X coordinate to determine which side of the wipe we are on
+            const pixelX = (i / 4) % WIDTH;
+            
+            // Get Alpha from the red channel of the Alpha matte (normalized to 0.0 - 1.0)
+            const alpha = dataAlpha[i] / 255.0;
+            const invAlpha = 1.0 - alpha;
+
+            // Background (B)
+            const bgR = dataBg[i];
+            const bgG = dataBg[i+1];
+            const bgB = dataBg[i+2];
+
+            let fgR, fgG, fgB;
+
+            // If left of slider: Use RVM Purified Foreground (F)
+            // If right of slider: Use Original Image with Green Spill (I)
+            if (pixelX < sliderX) {
+                fgR = dataPure[i];
+                fgG = dataPure[i+1];
+                fgB = dataPure[i+2];
+            } else {
+                fgR = dataRaw[i];
+                fgG = dataRaw[i+1];
+                fgB = dataRaw[i+2];
+            }
+
+            // Draw a white line for the slider itself
+            if (Math.abs(pixelX - sliderX) < 2) {
+                dataOut[i] = 255; dataOut[i+1] = 255; dataOut[i+2] = 255; dataOut[i+3] = 255;
+                continue;
+            }
+
+            // THE COMPOSITING EQUATION: C = (alpha * F) + ((1 - alpha) * B)
+            dataOut[i]   = Math.round((alpha * fgR) + (invAlpha * bgR));
+            dataOut[i+1] = Math.round((alpha * fgG) + (invAlpha * bgG));
+            dataOut[i+2] = Math.round((alpha * fgB) + (invAlpha * bgB));
+            dataOut[i+3] = 255; // Solid opacity for final display
+        }
+
+        // Push finished buffer to Canvas
+        const imageData = new ImageData(dataOut, WIDTH, HEIGHT);
+        renderCtx.putImageData(imageData, 0, 0);
+    }
+
+    //    function updateMathDisplay(x, y) {
+        // Clamp coordinates
+        x = Math.max(0, Math.min(x, WIDTH - 1));
+        y = Math.max(0, Math.min(y, HEIGHT - 1));
+        
+        hoverCoords.innerText = `x: ${x}, y: ${y}`;
+
+        // Find the pixel index in the 1D array
+        const i = (y * WIDTH + x) * 4;
+        const sliderX = parseInt(wipeSlider.value);
+        const isRVM = x < sliderX;
+
+        // Extract Math Data
+        const alpha = dataAlpha[i] / 255.0;
+        const invAlpha = 1.0 - alpha;
+        
+        const bgR = dataBg[i], bgG = dataBg[i+1], bgB = dataBg[i+2];
+        const outR = dataOut[i], outG = dataOut[i+1], outB = dataOut[i+2];
+
+        let fgR, fgG, fgB;
+        if (isRVM) {
+            fgR = dataPure[i]; fgG = dataPure[i+1]; fgB = dataPure[i+2];
+            
+            // Update UI Styling for RVM
+            modeIndicator.innerText = "Correct: RVM Purified (F)";
+            modeIndicator.className = "text-center font-bold text-lg mb-6 py-2 rounded code-font active-rvm highlight-green bg-green-900/20";
+            boxFg.className = "math-box flex-1 border-green-600 bg-green-900/20";
+            labelFg.innerText = "Purified Fore (F)";
+            labelFg.className = "text-[10px] text-green-400 uppercase font-bold";
+        } else {
+            fgR = dataRaw[i]; fgG = dataRaw[i+1]; fgB = dataRaw[i+2];
+            
+            // Update UI Styling for Naive Mistake
+            modeIndicator.innerText = "Mistake: Original Image (I)";
+            modeIndicator.className = "text-center font-bold text-lg mb-6 py-2 rounded code-font active-naive highlight-red bg-red-900/20";
+            boxFg.className = "math-box flex-1 border-red-600 bg-red-900/20";
+            labelFg.innerText = "Original Image (I)";
+            labelFg.className = "text-[10px] text-red-400 uppercase font-bold";
+        }
+
+        // Populate the DOM
+        valAlpha.innerText = alpha.toFixed(2);
+        valInvAlpha.innerText = invAlpha.toFixed(2);
+        
+        valFg.innerText = `${fgR}, ${fgG}, ${fgB}`;
+        colorFg.style.backgroundColor = `rgb(${fgR}, ${fgG}, ${fgB})`;
+
+        valBg.innerText = `${bgR}, ${bgG}, ${bgB}`;
+        colorBg.style.backgroundColor = `rgb(${bgR}, ${bgG}, ${bgB})`;
+
+        valOut.innerText = `${outR}, ${outG}, ${outB}`;
+        colorOut.style.backgroundColor = `rgb(${outR}, ${outG}, ${outB})`;
+    }
+
+    // Event Listeners
+    wipeSlider.addEventListener('input', (e) => {
+        runCompositingKernel(parseInt(e.target.value));
+    });
+
+    mainContainer.addEventListener('mousemove', (e) => {
+        const rect = renderCanvas.getBoundingClientRect();
+        // Scale mouse coordinates to internal canvas resolution
+        const scaleX = WIDTH / rect.width;
+        const scaleY = HEIGHT / rect.height;
+        
+        const x = Math.floor((e.clientX - rect.left) * scaleX);
+        const y = Math.floor((e.clientY - rect.top) * scaleY);
+        
+        updateMathDisplay(x, y);
+    });
+
+    // Handle touch for mobile
+    mainContainer.addEventListener('touchmove', (e) => {
+        const rect = renderCanvas.getBoundingClientRect();
+        const scaleX = WIDTH / rect.width;
+        const scaleY = HEIGHT / rect.height;
+        
+        const touch = e.touches[0];
+        const x = Math.floor((touch.clientX - rect.left) * scaleX);
+        const y = Math.floor((touch.clientY - rect.top) * scaleY);
+        
+        updateMathDisplay(x, y);
+        e.preventDefault(); // Prevent scrolling while wiping
+    }, {passive: false});
+
+    //    window.onload = function() {
+        // Generate the assets once
+        generateAssets();
+        
+        // Run the first composite frame
+        runCompositingKernel(300);
+        
+        // Initialize hover data in the center of the edge
+        updateMathDisplay(300, HEIGHT/2);
+    };
+
+</script>
+</body>
+</html>
