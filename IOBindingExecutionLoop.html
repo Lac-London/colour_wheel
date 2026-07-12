@@ -245,6 +245,32 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
                     <span class="text-white font-bold text-sm">ONNX</span>
                     <span class="text-emerald-400 text-xs">TensorRT EP</span>
                 </div>
+
+                <!-- Performance Dashboard -->
+                <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-slate-900/95 backdrop-blur border border-slate-700 p-3 rounded-lg shadow-2xl z-20 w-64 flex flex-col gap-2">
+                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-700 pb-1 flex items-center justify-center gap-1">
+                        <svg class="w-3 h-3 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        VRAM & PCIe Telemetry
+                    </h4>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-2">
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-slate-400">PCIe Traffic</span>
+                            <span class="code-font text-xs font-bold text-sky-400 transition-colors" id="met-pcie">0.0 GB/s</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-slate-400">Op Latency</span>
+                            <span class="code-font text-xs font-bold text-slate-300 transition-colors" id="met-lat">-- ms</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-slate-400">VRAM State</span>
+                            <span class="code-font text-xs font-bold text-emerald-400 transition-colors" id="met-vram">Stable</span>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] text-slate-400">Target FPS</span>
+                            <span class="code-font text-sm font-bold text-slate-300 transition-colors" id="met-fps">--</span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Controls -->
@@ -287,6 +313,12 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
     const badgeBad = document.getElementById('badge-bad');
     const badgeGood = document.getElementById('badge-good');
 
+    // Metrics
+    const metPcie = document.getElementById('met-pcie');
+    const metVram = document.getElementById('met-vram');
+    const metLat = document.getElementById('met-lat');
+    const metFps = document.getElementById('met-fps');
+
     // Positions (Relative to GPU Container)
     const POS = {
         srcStart: { top: '80px', left: '15%' },
@@ -319,6 +351,16 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         pathGood.classList.remove('path-anim');
         badgeBad.classList.remove('show');
         badgeGood.classList.remove('show');
+
+        // Reset metrics
+        metPcie.innerText = "0.0 GB/s";
+        metPcie.className = "code-font text-xs font-bold text-sky-400 transition-colors";
+        metVram.innerText = "Stable";
+        metVram.className = "code-font text-xs font-bold text-emerald-400 transition-colors";
+        metLat.innerText = "-- ms";
+        metLat.className = "code-font text-xs font-bold text-slate-300 transition-colors";
+        metFps.innerText = "--";
+        metFps.className = "code-font text-sm font-bold text-slate-300 transition-colors";
     }
 
     async function executeLoop() {
@@ -328,6 +370,9 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         // 1. BIND
         codes[0].classList.add('code-active');
         expBox.innerHTML = `<strong>Step 1: Bind.</strong> Tell the ONNX engine exactly where the <code class="text-sky-400">src</code> and <code class="text-amber-400">rxi</code> tensors currently live in VRAM.`;
+        metLat.innerText = "0.02 ms";
+        metPcie.innerText = "0.0 GB/s";
+        metFps.innerText = "--";
         
         tSrc.style.top = '120px'; tSrc.style.left = '35%';
         tRxi.style.top = '190px'; tRxi.style.left = '35%';
@@ -337,6 +382,9 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         // 2. RUN
         codes[1].classList.add('code-active');
         expBox.innerHTML = `<strong>Step 2: Session.Run.</strong> The TensorRT compiled engine executes the Math. Inputs are consumed.`;
+        metLat.innerText = "11.4 ms";
+        metVram.innerText = "Compute...";
+        metVram.classList.replace('text-emerald-400', 'text-amber-400');
         
         tSrc.style.opacity = 0;
         tRxi.style.opacity = 0;
@@ -349,6 +397,9 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         // 3. EXTRACT
         codes[2].classList.add('code-active');
         expBox.innerHTML = `<strong>Step 3: Extract.</strong> The engine spits out the Foreground/Alpha (<code class="text-rose-400">fgr</code>) and the updated memory states (<code class="text-amber-400">rxo</code>). They land safely in VRAM.`;
+        metLat.innerText = "0.05 ms";
+        metVram.innerText = "Stable";
+        metVram.classList.replace('text-amber-400', 'text-emerald-400');
         
         tFgr.style.opacity = 1;
         tRxo.style.opacity = 1;
@@ -368,6 +419,15 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         // Show bad path briefly
         pathBad.classList.add('path-anim');
         badgeBad.classList.add('show');
+        metPcie.innerText = "14.2 GB/s";
+        metPcie.classList.replace('text-sky-400', 'text-red-400');
+        metLat.innerText = "28.5 ms";
+        metLat.classList.replace('text-slate-300', 'text-red-400');
+        metFps.innerText = "18 FPS";
+        metFps.className = "code-font text-sm font-bold text-red-400 transition-colors pulse";
+        metVram.innerText = "Spiking...";
+        metVram.classList.replace('text-emerald-400', 'text-red-400');
+        
         await sleep(1500);
         pathBad.classList.remove('path-anim');
         badgeBad.classList.remove('show');
@@ -375,6 +435,15 @@ rxi_tensor = <span class="text-sky-300">std::move</span>(rxo);</div>
         // Show good path & animate swap
         pathGood.classList.add('path-anim');
         badgeGood.classList.add('show');
+        
+        metPcie.innerText = "0.0 GB/s";
+        metPcie.classList.replace('text-red-400', 'text-emerald-400');
+        metLat.innerText = "0.01 ms";
+        metLat.classList.replace('text-red-400', 'text-emerald-400');
+        metFps.innerText = "60 FPS";
+        metFps.className = "code-font text-sm font-bold text-emerald-400 transition-colors drop-shadow-[0_0_8px_rgba(16,185,129,0.8)]";
+        metVram.innerText = "Zero-Copy";
+        metVram.classList.replace('text-red-400', 'text-emerald-400');
         
         tRxo.style.top = POS.rxiStart.top;
         tRxo.style.left = POS.rxiStart.left;
